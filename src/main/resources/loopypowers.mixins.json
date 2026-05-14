@@ -1,0 +1,18 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.loopy.loopypowers.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"ArmourSlotMixin",
+		"PlayerEntityDropMixin",
+		"ScreenHandlerMixin",
+		"PlayerWaterWalkMixin",
+		"FistMiningSpeedMixin",
+		"FistMiningStrengthMixin",
+		"EntityExplodeResistMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

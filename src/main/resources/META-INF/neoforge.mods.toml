@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="All Rights Reserved"
+
+[[mods]]
+modId="loopypowers"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''${mod_description}'''
+
+# THIS IS CRITICAL
+# This tells NeoForge to load mixins.
+[[mixins]]
+config="loopypowers.mixins.json"
+
+[[mixins]]
+config="loopypowers.client.mixins.json"
+environment="client"
+
+[[dependencies.loopypowers]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.loopypowers]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"

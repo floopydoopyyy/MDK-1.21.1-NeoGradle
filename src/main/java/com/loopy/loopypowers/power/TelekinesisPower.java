@@ -1,0 +1,1046 @@
+package com.loopy.loopypowers.power;
+
+import com.loopy.loopypowers.damage.ModDamageTypes;
+import com.loopy.loopypowers.manager.PassiveManager;
+import com.loopy.loopypowers.sound.ModSounds;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.animal.Sheep;
+import net.minecraft.world.entity.item.FallingBlockEntity;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.BlockPos;
+import org.joml.Vector3f;
+
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.HashSet;
+
+public class TelekinesisPower implements PowerInterface {
+
+    /* ============================================================
+       STATE STORAGE (OPTIMIZED)
+       ============================================================ */
+
+    private static final Map<UUID, TKCasterState> ACTIVE_CASTERS = new HashMap<>();
+    private static final Map<UUID, TKVictimState> ACTIVE_VICTIMS = new HashMap<>();
+
+    private static class DebrisField {
+        final Map<UUID, Double> orbitAngles = new HashMap<>();
+        int ticksRemaining = 0;
+    }
+
+    private static class TKCasterState {
+        int readyThrowTicks = 0;
+        int throwCd = 0;
+        int debrisThrowCd = 0;
+        boolean prevSwing = false;
+        long lastSwingTime = 0;
+
+        DebrisField debrisField = null;
+        final Map<UUID, Vec3> thrownBlocks = new HashMap<>();
+    }
+
+    private static class TKVictimState {
+        int suspendTicks = 0;
+        int chokeTicks = 0;
+        UUID suspendOwner = null;
+
+        int airborneTicks = 0;
+        UUID impactOwner = null;
+        Vec3 prevVelocity = null;
+    }
+
+    private static TKCasterState getCasterState(Entity player) {
+        return ACTIVE_CASTERS.computeIfAbsent(player.getUUID(), k -> new TKCasterState());
+    }
+
+    /* ============================================================
+       CONSTANTS
+       ============================================================ */
+
+    // ── Passive — Forceful Strikes ──────────────────────────────
+    private static final double PASSIVE_KB_MULT     = 1.8;
+    private static final double PASSIVE_KB_VERTICAL = 0.2;
+
+    // ── Primary — Yank ──────────────────────────────────────────
+    private static final double YANK_RANGE          = 12.0;
+    private static final double YANK_CONE_DOT       = 0.6;
+    private static final double YANK_STRENGTH       = 0.9;
+    private static final double YANK_VERTICAL       = 0.3;
+
+    // ── Secondary Suspend / throw phase ─────────────────────────────
+    private static final int    SUSPEND_TICKS         = 50;
+    private static final double SUSPEND_FLOAT_VEL     = 0.05;
+    private static final int    THROW_READY_TICKS     = 45;
+    private static final double THROW_SCAN_RANGE      = 14.0;
+    private static final double THROW_SCAN_WIDTH      = 2.5;
+    private static final double THROW_SPEED_H         = 1.5;
+    private static final double THROW_SPEED_V         = 0.6;
+    private static final double THROW_RELEASE_RANGE   = 12.0;
+
+    // ── Choke phase ──────────────────────
+    private static final int    CHOKE_TICKS           = 60;
+    private static final int    CHOKE_DAMAGE_INTERVAL = 10;
+    private static final float  CHOKE_DAMAGE_PER_TICK = 2.0f;
+    private static final double CHOKE_SQUEEZE_VEL     = -0.01;
+    private static final double CHOKE_ORBIT_RADIUS_START = 0.5;
+    private static final double CHOKE_ORBIT_RADIUS_END   = 0.2;
+
+    // EGG
+    private static final int    QUOTE_CHANCE           = 450;
+
+    // ── Impact system ──
+    private static final int    TK_AIRBORNE_TICKS   = 40;
+
+    private static final double IMPACT_MIN_SPEED_H  = 0.6;
+    private static final double IMPACT_MIN_SPEED_V  = 0.7;
+
+    private static final float  IMPACT_WALL_DAMAGE  = 16.0f;
+    private static final float  IMPACT_WALL_SCALE   = 2.5f;
+
+    private static final float  IMPACT_FLOOR_DAMAGE = 9.5f;
+    private static final float  IMPACT_FLOOR_SCALE  = 1.8f;
+
+    // ── Ultimate ──────────────────────────────────
+    private static final int    DEBRIS_MAX_BLOCKS            = 10;
+    private static final double DEBRIS_HARVEST_RADIUS        = 10.0;
+    private static final int    DEBRIS_ORBIT_TICKS           = 260;
+    private static final double DEBRIS_ORBIT_RADIUS          = 4.5;
+    private static final double DEBRIS_ORBIT_RADIUS_INNER    = 2.5;
+    private static final double DEBRIS_ORBIT_SPEED           = 0.045;
+    private static final double DEBRIS_ORBIT_SPEED_INNER     = 0.08;
+    private static final double DEBRIS_PULL_RADIUS           = 12.0;
+    private static final double DEBRIS_PULL_STRENGTH         = 0.07;
+    private static final float  DEBRIS_PULL_DAMAGE           = 0.1f;
+    private static final int    DEBRIS_THROW_COOLDOWN        = 8;
+    private static final int    DEBRIS_THROW_COUNT           = 5;
+    private static final float  DEBRIS_THROW_DAMAGE          = 13.0f;
+    private static final double DEBRIS_THROW_SPEED           = 2.4;
+    private static final double DEBRIS_THROW_SPREAD          = 0.3;
+    private static final double DEBRIS_THROW_EXPLOSION_RADIUS = 4.0;
+
+    // block regen
+    private static final int    DEBRIS_REGEN_DELAY_TICKS = 15;
+    private static final int    DEBRIS_REGEN_INTERVAL    = 20;
+    private static final int    DEBRIS_REGEN_AMOUNT      = 5;
+
+    // EGG
+    private static final int    WOOLLIAM_CHANCE            = 70;
+
+    /* ============================================================
+       PARTICLE STUFF
+       ============================================================ */
+
+    private static final DustParticleOptions TK_PINK =
+            new DustParticleOptions(new Vector3f(1.0f, 0.2f, 0.7f), 1.2f);
+    private static final DustParticleOptions TK_LIGHT_PINK =
+            new DustParticleOptions(new Vector3f(1.0f, 0.55f, 0.85f), 0.9f);
+    private static final DustParticleOptions TK_MAGENTA =
+            new DustParticleOptions(new Vector3f(0.85f, 0.0f, 0.5f), 1.5f);
+    private static final DustParticleOptions TK_PINK_LARGE =
+            new DustParticleOptions(new Vector3f(1.0f, 0.35f, 0.75f), 2.2f);
+    private static final DustParticleOptions TK_DARK_PINK =
+            new DustParticleOptions(new Vector3f(0.6f, 0.0f, 0.35f), 1.8f);
+
+    private static void spawnImpactRing(ServerLevel world, Vec3 pos, int count, double radius) {
+        for (int i = 0; i < count; i++) {
+            double angle = Math.PI * 2.0 * i / count;
+            world.sendParticles(TK_MAGENTA,
+                    pos.x, pos.y + 0.1, pos.z,
+                    1, Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius, 0.04);
+        }
+        world.sendParticles(TK_PINK, pos.x, pos.y + 0.5, pos.z, 6, 0.3, 0.3, 0.3, 0.05);
+    }
+
+    private static void spawnSuspendAura(ServerLevel world, LivingEntity entity, long time) {
+        double radius = 0.7;
+        for (int i = 0; i < 6; i++) {
+            double angle = (time * 0.12) + (i * Math.PI * 2.0 / 6);
+            world.sendParticles(TK_PINK,
+                    entity.getX() + Math.cos(angle) * radius,
+                    entity.getY(0.6),
+                    entity.getZ() + Math.sin(angle) * radius,
+                    1, 0, 0.02, 0, 0);
+        }
+        if (time % 3 == 0) {
+            world.sendParticles(TK_LIGHT_PINK,
+                    entity.getX(), entity.getY(0.5), entity.getZ(),
+                    2, 0.25, 0.1, 0.25, 0.01);
+        }
+    }
+
+    private static void spawnChokeAura(ServerLevel world, LivingEntity entity, long time, float chokeProgress) {
+        double radius = CHOKE_ORBIT_RADIUS_START
+                + (CHOKE_ORBIT_RADIUS_END - CHOKE_ORBIT_RADIUS_START) * chokeProgress;
+        double spinSpeed = 0.12 + chokeProgress * 0.30;
+        int points = 8;
+
+        for (int i = 0; i < points; i++) {
+            double angle = (time * spinSpeed) + (i * Math.PI * 2.0 / points);
+            double x = entity.getX() + Math.cos(angle) * radius;
+            double z = entity.getZ() + Math.sin(angle) * radius;
+            double y = entity.getY(0.3 + chokeProgress * 0.4);
+
+            world.sendParticles(TK_DARK_PINK, x, y, z, 1, 0, 0.01, 0, 0);
+        }
+
+        if (chokeProgress > 0.5f) {
+            double innerRadius = radius * 0.4;
+            for (int i = 0; i < 4; i++) {
+                double angle = -(time * spinSpeed * 1.5) + (i * Math.PI / 2.0);
+                world.sendParticles(TK_MAGENTA,
+                        entity.getX() + Math.cos(angle) * innerRadius,
+                        entity.getY(0.5),
+                        entity.getZ() + Math.sin(angle) * innerRadius,
+                        1, 0, 0.02, 0, 0);
+            }
+        }
+
+        if (time % 2 == 0) {
+            world.sendParticles(TK_DARK_PINK,
+                    entity.getX(), entity.getY(0.8), entity.getZ(),
+                    2, 0.15, 0.08, 0.15, 0.03);
+        }
+    }
+
+    private static void spawnBeam(ServerLevel world, Vec3 from, Vec3 to) {
+        Vec3 dir = to.subtract(from);
+        int steps = (int)(dir.length() / 0.35);
+        Vec3 step = dir.normalize().scale(0.35);
+        Vec3 pos = from;
+        for (int i = 0; i < steps; i++) {
+            if (i % 2 == 0) world.sendParticles(TK_PINK, pos.x, pos.y, pos.z, 1, 0.03, 0.03, 0.03, 0);
+            if (world.random.nextFloat() < 0.2f) world.sendParticles(TK_LIGHT_PINK, pos.x, pos.y, pos.z, 1, 0.05, 0.05, 0.05, 0.01);
+            pos = pos.add(step);
+        }
+    }
+
+    private static void spawnSlamImpact(ServerLevel world, Vec3 pos) {
+        spawnImpactRing(world, pos, 24, 0.5);
+        for (int i = 0; i < 20; i++) {
+            double angle = Math.PI * 2.0 * i / 20;
+            world.sendParticles(TK_PINK_LARGE,
+                    pos.x + Math.cos(angle) * 1.5, pos.y + 0.1, pos.z + Math.sin(angle) * 1.5,
+                    1, Math.cos(angle) * 0.15, 0.05, Math.sin(angle) * 0.15, 0.02);
+        }
+        world.sendParticles(TK_MAGENTA, pos.x, pos.y + 0.3, pos.z, 12, 0.5, 0.4, 0.5, 0.08);
+        world.sendParticles(ParticleTypes.END_ROD, pos.x, pos.y + 0.5, pos.z, 8, 0.4, 0.3, 0.4, 0.06);
+    }
+
+    private static void spawnWallImpact(ServerLevel world, Vec3 pos) {
+        spawnImpactRing(world, pos, 18, 0.4);
+        world.sendParticles(TK_MAGENTA, pos.x, pos.y + 0.5, pos.z, 10, 0.4, 0.4, 0.4, 0.07);
+        world.sendParticles(TK_PINK_LARGE, pos.x, pos.y + 0.3, pos.z, 5, 0.3, 0.3, 0.3, 0.04);
+
+        for (int i = 0; i < 12; i++) {
+            double angle = world.random.nextDouble() * Math.PI * 2;
+            double speed = 0.1 + world.random.nextDouble() * 0.2;
+            world.sendParticles(TK_DARK_PINK,
+                    pos.x, pos.y + 0.5, pos.z,
+                    1, Math.cos(angle) * speed, (world.random.nextDouble() - 0.3) * speed, Math.sin(angle) * speed, 0.01);
+        }
+    }
+
+    private static void spawnFloorImpact(ServerLevel world, Vec3 pos) {
+        spawnImpactRing(world, pos, 12, 0.35);
+        world.sendParticles(TK_PINK, pos.x, pos.y + 0.2, pos.z, 5, 0.3, 0.1, 0.3, 0.04);
+    }
+
+    /* ============================================================
+       ESSENTIAL
+       ============================================================ */
+
+    @Override
+    public void onAssign(ServerPlayer player) {
+        player.getTags().removeIf(tag -> tag.startsWith("tk_"));
+        ACTIVE_CASTERS.put(player.getUUID(), new TKCasterState());
+    }
+
+    @Override
+    public void onRemove(ServerPlayer player) {
+        player.getTags().removeIf(tag -> tag.startsWith("tk_"));
+
+        UUID pid = player.getUUID();
+        TKCasterState caster = ACTIVE_CASTERS.remove(pid);
+
+        if (caster == null) return;
+
+        if (player.getServer() != null) {
+            for (ServerLevel w : player.getServer().getAllLevels()) {
+                if (caster.debrisField != null) {
+                    for (UUID uuid : caster.debrisField.orbitAngles.keySet()) {
+                        Entity e = w.getEntity(uuid);
+                        if (e != null) e.discard();
+                    }
+                    caster.debrisField = null;
+                }
+
+                for (UUID uuid : caster.thrownBlocks.keySet()) {
+                    Entity e = w.getEntity(uuid);
+                    if (e != null) e.discard();
+                }
+                caster.thrownBlocks.clear();
+            }
+        }
+
+        Iterator<Map.Entry<UUID, TKVictimState>> it = ACTIVE_VICTIMS.entrySet().iterator();
+        while (it.hasNext()) {
+            TKVictimState vState = it.next().getValue();
+            if (pid.equals(vState.suspendOwner)) {
+                vState.suspendOwner = null;
+                vState.suspendTicks = 0;
+                vState.chokeTicks = 0;
+            }
+            if (pid.equals(vState.impactOwner)) {
+                vState.impactOwner = null;
+                vState.airborneTicks = 0;
+                vState.prevVelocity = null;
+            }
+            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0) {
+                it.remove();
+            }
+        }
+    }
+
+    @Override
+    public void onDeath(ServerPlayer player) {
+        onRemove(player);
+    }
+
+    @Override
+    public void onTick(ServerPlayer player) {
+        if (!player.isAlive()) return;
+
+        ServerLevel world = player.serverLevel();
+        TKCasterState caster = getCasterState(player);
+
+        boolean isSwinging = player.swinging;
+        boolean wasSwinging = caster.prevSwing;
+
+        if (isSwinging && !wasSwinging) {
+            if (caster.throwCd <= 0) {
+                performThrow(player, caster);
+                caster.throwCd = 8;
+            }
+            throwDebrisProjectile(player, caster);
+        }
+
+        caster.prevSwing = isSwinging;
+        if (caster.throwCd > 0) caster.throwCd--;
+        if (caster.readyThrowTicks > 0) caster.readyThrowTicks--;
+        if (caster.debrisThrowCd > 0) caster.debrisThrowCd--;
+
+        Iterator<Map.Entry<UUID, TKVictimState>> it = ACTIVE_VICTIMS.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, TKVictimState> entry = it.next();
+            TKVictimState vState = entry.getValue();
+
+            boolean ownsSuspend = player.getUUID().equals(vState.suspendOwner);
+            boolean ownsImpact = player.getUUID().equals(vState.impactOwner);
+
+            if (!ownsSuspend && !ownsImpact) continue;
+
+            Entity ent = world.getEntity(entry.getKey());
+            if (!(ent instanceof LivingEntity le) || !le.isAlive()) {
+                if (ownsSuspend) { vState.suspendTicks = 0; vState.chokeTicks = 0; vState.suspendOwner = null; }
+                if (ownsImpact) { vState.airborneTicks = 0; vState.impactOwner = null; vState.prevVelocity = null; }
+            } else {
+                if (ownsSuspend) handleSuspendAndChoke(le, world, vState);
+                if (ownsImpact) handleImpactDamage(le, world, vState);
+            }
+
+            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0) {
+                it.remove();
+            }
+        }
+
+        handleDebrisField(player, caster);
+        tickThrownBlocks(player, caster);
+    }
+
+    @Override
+    public void onHit(ServerPlayer attacker, LivingEntity target) {
+        if (!PassiveManager.isEnabled(attacker)) return;
+
+        TKCasterState caster = getCasterState(attacker);
+        caster.lastSwingTime = attacker.serverLevel().getGameTime();
+
+        Vec3 look = attacker.getViewVector(1.0f);
+        target.setDeltaMovement(target.getDeltaMovement().add(look.x * PASSIVE_KB_MULT, PASSIVE_KB_VERTICAL, look.z * PASSIVE_KB_MULT));
+        target.hasImpulse = true;
+
+        markForImpactTracking(target, target.getDeltaMovement(), attacker.getUUID());
+
+        ServerLevel world = attacker.serverLevel();
+        spawnImpactRing(world, target.position(), 10, 0.3);
+        world.sendParticles(TK_LIGHT_PINK, target.getX(), target.getY(0.7), target.getZ(), 4, 0.2, 0.3, 0.2, 0.03);
+    }
+
+    private void markForImpactTracking(LivingEntity entity, Vec3 launchVelocity, UUID attackerUuid) {
+        TKVictimState vState = ACTIVE_VICTIMS.computeIfAbsent(entity.getUUID(), k -> new TKVictimState());
+        vState.airborneTicks = TK_AIRBORNE_TICKS;
+        vState.impactOwner = attackerUuid;
+        vState.prevVelocity = launchVelocity;
+    }
+
+    private void handleImpactDamage(LivingEntity entity, ServerLevel world, TKVictimState vState) {
+        if (vState.airborneTicks <= 0) return;
+
+        vState.airborneTicks--;
+
+        Vec3 prev = vState.prevVelocity;
+        Vec3 curr = entity.getDeltaMovement();
+
+        if (prev != null) {
+            double prevH = Math.sqrt(prev.x * prev.x + prev.z * prev.z);
+            double currH = Math.sqrt(curr.x * curr.x + curr.z * curr.z);
+
+            boolean wallStopped = prevH > IMPACT_MIN_SPEED_H && currH < prevH * 0.35 && entity.horizontalCollision;
+            boolean floorHit = prev.y < -IMPACT_MIN_SPEED_V && entity.onGround();
+
+            Entity attacker = resolveOwner(vState.impactOwner, world);
+
+            if (wallStopped) {
+                float damage = IMPACT_WALL_DAMAGE + (float)(prevH - IMPACT_MIN_SPEED_H) * IMPACT_WALL_SCALE;
+                entity.hurt(ModDamageTypes.wallCollision(world, attacker), damage);
+                spawnWallImpact(world, entity.position().add(0, 0.8, 0));
+                world.playSound(null, entity.blockPosition(), SoundEvents.STONE_HIT, entity.getSoundSource(), 0.9f, 0.7f);
+
+                vState.airborneTicks = 0;
+                vState.prevVelocity = null;
+                vState.impactOwner = null;
+                return;
+            }
+
+            if (floorHit) {
+                float damage = IMPACT_FLOOR_DAMAGE + (float)(-prev.y - IMPACT_MIN_SPEED_V) * IMPACT_FLOOR_SCALE;
+                entity.hurt(ModDamageTypes.wallCollision(world, attacker), damage);
+                spawnFloorImpact(world, entity.position());
+                world.playSound(null, entity.blockPosition(), SoundEvents.STONE_FALL, entity.getSoundSource(), 0.8f, 0.9f);
+
+                vState.airborneTicks = 0;
+                vState.prevVelocity = null;
+                vState.impactOwner = null;
+                return;
+            }
+        }
+
+        vState.prevVelocity = curr;
+
+        if (vState.airborneTicks <= 0) {
+            vState.impactOwner = null;
+            vState.prevVelocity = null;
+        }
+    }
+
+    /* ============================================================
+       PRIMARY
+       ============================================================ */
+
+    @Override
+    public void activatePrimary(ServerPlayer player) {
+        ServerLevel world = player.serverLevel();
+        Vec3 origin = player.getEyePosition();
+        Vec3 look   = player.getViewVector(1.0f);
+
+        spawnBeam(world, origin, origin.add(look.scale(YANK_RANGE)));
+
+        boolean hitAnything = false;
+        for (LivingEntity e : world.getEntitiesOfClass(LivingEntity.class,
+                player.getBoundingBox().inflate(YANK_RANGE),
+                en -> en.isAlive() && en != player)) {
+
+            Vec3 toTarget = e.position().subtract(origin).normalize();
+            if (look.dot(toTarget) < YANK_CONE_DOT) continue;
+
+            Vec3 pull = origin.subtract(e.position()).normalize().scale(YANK_STRENGTH);
+            Vec3 launchVel = e.getDeltaMovement().add(pull.x, pull.y + YANK_VERTICAL, pull.z);
+            e.setDeltaMovement(launchVel);
+            e.hasImpulse = true;
+
+            markForImpactTracking(e, launchVel, player.getUUID());
+            spawnImpactRing(world, e.position(), 8, 0.25);
+            hitAnything = true;
+        }
+
+        world.playSound(null, player.blockPosition(),
+                ModSounds.YANK.get(), player.getSoundSource(), 0.6f, 1.2f);
+        if (hitAnything) world.playSound(null, player.blockPosition(),
+                SoundEvents.ILLUSIONER_CAST_SPELL, player.getSoundSource(), 0.4f, 1.5f);
+
+        player.swing(InteractionHand.MAIN_HAND, true);
+    }
+
+    /* ============================================================
+       SECONDARY
+       ============================================================ */
+
+    @Override
+    public void activateSecondary(ServerPlayer player) {
+        ServerLevel world = player.serverLevel();
+        Vec3 origin = player.getEyePosition();
+        Vec3 look   = player.getViewVector(1.0f);
+        Vec3 end    = origin.add(look.scale(THROW_SCAN_RANGE));
+
+        spawnBeam(world, origin, end);
+
+        int grabbed = 0;
+        for (LivingEntity e : world.getEntitiesOfClass(LivingEntity.class,
+                new AABB(origin, end).inflate(THROW_SCAN_WIDTH),
+                en -> en.isAlive() && en != player)) {
+
+            TKVictimState vState = ACTIVE_VICTIMS.computeIfAbsent(e.getUUID(), k -> new TKVictimState());
+            vState.suspendTicks = SUSPEND_TICKS;
+            vState.chokeTicks = 0;
+            vState.suspendOwner = player.getUUID();
+
+            spawnImpactRing(world, e.position(), 10, 0.3);
+            grabbed++;
+        }
+
+        if (grabbed > 0) {
+            TKCasterState caster = getCasterState(player);
+            caster.readyThrowTicks = THROW_READY_TICKS;
+        }
+
+        world.playSound(null, player.blockPosition(),
+                ModSounds.SUSPEND.get(), player.getSoundSource(), 0.7f, 0.9f);
+    }
+
+    private void handleSuspendAndChoke(LivingEntity e, ServerLevel world, TKVictimState vState) {
+        if (vState.suspendTicks > 0) {
+            vState.suspendTicks--;
+            e.setDeltaMovement(e.getDeltaMovement().x * 0.3, SUSPEND_FLOAT_VEL, e.getDeltaMovement().z * 0.3);
+            e.hasImpulse = true;
+            e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 5, 4, true, false, false));
+            spawnSuspendAura(world, e, world.getGameTime());
+
+            if (vState.suspendTicks <= 0) {
+                vState.chokeTicks = CHOKE_TICKS;
+
+                // --- EASTER EGG ---
+                if (e instanceof ServerPlayer && world.random.nextInt(QUOTE_CHANCE) == 0) {
+                    Entity owner = resolveOwner(vState.suspendOwner, world);
+                    if (owner instanceof ServerPlayer attacker) {
+                        Component message = Component.literal(
+                                "<" + attacker.getName().getString() + "> I find your lack of faith... disturbing..."
+                        );
+                        world.getServer().getPlayerList().broadcastSystemMessage(message, false);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (vState.chokeTicks > 0) {
+            vState.chokeTicks--;
+            float chokeProgress = 1.0f - ((float) vState.chokeTicks / CHOKE_TICKS);
+            e.setDeltaMovement(e.getDeltaMovement().x * 0.2, CHOKE_SQUEEZE_VEL + chokeProgress * 0.10, e.getDeltaMovement().z * 0.2);
+            e.hasImpulse = true;
+
+            if (e.tickCount % CHOKE_DAMAGE_INTERVAL == 0) {
+                Entity attacker = resolveOwner(vState.suspendOwner, world);
+                e.hurt(ModDamageTypes.strangle(world, attacker), CHOKE_DAMAGE_PER_TICK * (0.5f + chokeProgress));
+                world.playSound(null, e.blockPosition(), SoundEvents.PLAYER_HURT_SWEET_BERRY_BUSH, e.getSoundSource(), 0.4f + chokeProgress * 0.3f, 0.9f);
+            }
+            spawnChokeAura(world, e, world.getGameTime(), chokeProgress);
+
+            if (vState.chokeTicks <= 0) {
+                vState.suspendOwner = null;
+            }
+        }
+    }
+
+    private void performThrow(ServerPlayer player, TKCasterState caster) {
+        if (caster.readyThrowTicks <= 0) return;
+        caster.readyThrowTicks = 0;
+
+        Vec3 look = player.getViewVector(1.0f);
+        ServerLevel world = player.serverLevel();
+
+        Vec3 throwVel = new Vec3(
+                look.x * THROW_SPEED_H,
+                THROW_SPEED_V,
+                look.z * THROW_SPEED_H
+        );
+
+        boolean thrown = false;
+
+        for (Map.Entry<UUID, TKVictimState> entry : ACTIVE_VICTIMS.entrySet()) {
+            TKVictimState vState = entry.getValue();
+            if ((vState.suspendTicks > 0 || vState.chokeTicks > 0) && player.getUUID().equals(vState.suspendOwner)) {
+                Entity e = world.getEntity(entry.getKey());
+                if (e instanceof LivingEntity le && le.isAlive() && le.distanceToSqr(player) <= (THROW_RELEASE_RANGE * THROW_RELEASE_RANGE)) {
+
+                    vState.suspendTicks = 0;
+                    vState.chokeTicks = 0;
+                    vState.suspendOwner = null;
+
+                    le.setDeltaMovement(throwVel);
+                    le.hasImpulse = true;
+
+                    markForImpactTracking(le, throwVel, player.getUUID());
+
+                    spawnImpactRing(world, le.position(), 14, 0.4);
+                    world.sendParticles(TK_MAGENTA,
+                            le.getX(), le.getY(0.5), le.getZ(),
+                            8, 0.3, 0.3, 0.3, 0.06);
+                    thrown = true;
+                }
+            }
+        }
+
+        if (thrown) {
+            world.playSound(null, player.blockPosition(),
+                    SoundEvents.ENDER_DRAGON_FLAP,
+                    player.getSoundSource(), 0.6f, 1.4f);
+        }
+    }
+
+    /* ============================================================
+       ULTIMATE
+       ============================================================ */
+
+    @Override
+    public void activateUltimate(ServerPlayer player) {
+        ServerLevel world = player.serverLevel();
+        TKCasterState caster = getCasterState(player);
+
+        if (caster.debrisField != null) {
+            for (UUID uuid : caster.debrisField.orbitAngles.keySet()) {
+                Entity e = world.getEntity(uuid);
+                if (e != null) e.discard();
+            }
+        }
+
+        DebrisField field = new DebrisField();
+        field.ticksRemaining = DEBRIS_ORBIT_TICKS;
+        caster.debrisField = field;
+
+        int harvested = tryHarvestBlocks(player, world, field);
+
+        for (int ring = 0; ring < 3; ring++) {
+            double ringRadius = 1.5 + ring * 2.5;
+            int points = 12 + ring * 6;
+            for (int i = 0; i < points; i++) {
+                double angle = Math.PI * 2.0 * i / points;
+                world.sendParticles(ring % 2 == 0 ? TK_PINK_LARGE : TK_MAGENTA,
+                        player.getX() + Math.cos(angle) * ringRadius,
+                        player.getY(0.5),
+                        player.getZ() + Math.sin(angle) * ringRadius,
+                        1, 0, 0.12, 0, 0.03);
+            }
+        }
+
+        for (int i = 0; i < 20; i++) {
+            double a = world.random.nextDouble() * Math.PI * 2;
+            double r = world.random.nextDouble() * 1.5;
+            world.sendParticles(TK_DARK_PINK,
+                    player.getX() + Math.cos(a) * r,
+                    player.getY(0.3) + world.random.nextDouble() * 2.0,
+                    player.getZ() + Math.sin(a) * r,
+                    1, 0, 0.15, 0, 0.04);
+        }
+
+        world.playSound(null, player.blockPosition(),
+                SoundEvents.WARDEN_SONIC_BOOM, player.getSoundSource(), 1.2f, 0.4f);
+
+        if (harvested > 0) {
+            world.playSound(null, player.blockPosition(),
+                    SoundEvents.STONE_BREAK, player.getSoundSource(), 1.5f, 0.6f);
+        }
+
+        world.playSound(null, player.blockPosition(),
+                SoundEvents.GENERIC_EXPLODE.value(), player.getSoundSource(), 0.6f, 0.5f);
+    }
+
+    private int tryHarvestBlocks(ServerPlayer player, ServerLevel world, DebrisField field) {
+        Vec3 center = player.position();
+        int radius = (int) Math.ceil(DEBRIS_HARVEST_RADIUS);
+        List<BlockPos> candidates = new ArrayList<>();
+
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -3; dy <= 4; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos pos = player.blockPosition().offset(dx, dy, dz);
+                    if (pos.closerToCenterThan(center, DEBRIS_HARVEST_RADIUS) && isHarvestable(world, pos)) {
+                        candidates.add(pos);
+                    }
+                }
+            }
+        }
+
+        java.util.Collections.shuffle(candidates, new java.util.Random());
+
+        int harvested = 0;
+        boolean wooliamSpawned = false;
+
+        for (BlockPos pos : candidates) {
+            if (harvested >= DEBRIS_MAX_BLOCKS) break;
+
+            BlockState state = world.getBlockState(pos);
+            world.removeBlock(pos, false);
+
+            Entity orbitEntity;
+
+            // --- EASTER EGG ---
+            if (!wooliamSpawned && world.random.nextInt(WOOLLIAM_CHANCE) == 0) {
+                Sheep sheep = EntityType.SHEEP.create(world);
+                if (sheep != null) {
+                    sheep.setCustomName(Component.literal("Woolliam"));
+                    sheep.setNoGravity(true);
+                    sheep.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 0, 0);
+                    world.addFreshEntity(sheep);
+                    orbitEntity = sheep;
+                    wooliamSpawned = true;
+                } else {
+                    orbitEntity = FallingBlockEntity.fall(world, pos, state);
+                }
+            } else {
+                orbitEntity = FallingBlockEntity.fall(world, pos, state);
+            }
+
+            if (orbitEntity instanceof FallingBlockEntity falling) {
+                falling.setNoGravity(true);
+                falling.dropItem = false;
+                falling.time = -32768; // Mojmap mapping for timeFalling
+            }
+
+            field.orbitAngles.put(orbitEntity.getUUID(), (Math.PI * 2.0 * harvested) / DEBRIS_MAX_BLOCKS);
+            harvested++;
+        }
+        return harvested;
+    }
+
+    private boolean isHarvestable(ServerLevel world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || world.getBlockEntity(pos) != null) return false;
+        if (!state.canOcclude()) return false;
+
+        return state.is(BlockTags.LOGS)
+                || state.is(BlockTags.DIRT)
+                || state.is(BlockTags.SAND)
+                || state.is(BlockTags.SNOW)
+                || state.is(BlockTags.MINEABLE_WITH_PICKAXE);
+    }
+
+    private void handleDebrisField(ServerPlayer player, TKCasterState caster) {
+        DebrisField field = caster.debrisField;
+        if (field == null || field.ticksRemaining <= 0) return;
+
+        handleDebrisRegen(player, caster, field);
+        ServerLevel world = player.serverLevel();
+        field.ticksRemaining--;
+
+        if (field.ticksRemaining <= 0) {
+            for (UUID uuid : field.orbitAngles.keySet()) {
+                Entity e = world.getEntity(uuid);
+                if (e != null) e.discard();
+            }
+            caster.debrisField = null;
+            return;
+        }
+
+        Vec3 playerPos = player.position().add(0, 1.0, 0);
+        Set<UUID> toRemove = new HashSet<>();
+        int total = field.orbitAngles.size();
+
+        int index = 0;
+        for (Map.Entry<UUID, Double> entry : field.orbitAngles.entrySet()) {
+            UUID uuid = entry.getKey();
+            Entity ent = world.getEntity(uuid);
+
+            if (ent == null || ent.isRemoved()) {
+                toRemove.add(uuid);
+                index++;
+                continue;
+            }
+
+            boolean isInner = (index % 2 == 1);
+            double orbitRadius = isInner ? DEBRIS_ORBIT_RADIUS_INNER : DEBRIS_ORBIT_RADIUS;
+            double orbitSpeed  = isInner ? -DEBRIS_ORBIT_SPEED_INNER : DEBRIS_ORBIT_SPEED;
+
+            double angle = (Math.PI * 2.0 * (double)(index / 2)) / (double) Math.max(1, total / 2) + (world.getGameTime() * orbitSpeed);
+            entry.setValue(angle);
+
+            double x = playerPos.x + Math.cos(angle) * orbitRadius;
+            double z = playerPos.z + Math.sin(angle) * orbitRadius;
+            double y = playerPos.y + Math.sin(angle * 1.5 + world.getGameTime() * 0.08) * 0.5 + (isInner ? 0.3 : 0.0);
+
+            Vec3 target = new Vec3(x, y, z);
+            ent.setDeltaMovement(target.subtract(ent.position()).scale(0.35));
+            ent.hasImpulse = true;
+
+            if (target.distanceTo(ent.position()) > 5.0) ent.setPos(target.x, target.y, target.z);
+
+            ent.setNoGravity(true);
+            if (ent instanceof FallingBlockEntity fb) fb.time = -32768;
+
+            world.sendParticles(isInner ? TK_MAGENTA : TK_DARK_PINK, target.x, target.y, target.z, 1, 0.04, 0.04, 0.04, 0.01);
+            index++;
+        }
+        toRemove.forEach(field.orbitAngles::remove);
+
+        double contactRadius = DEBRIS_ORBIT_RADIUS_INNER * 1.2;
+
+        for (LivingEntity e : world.getEntitiesOfClass(LivingEntity.class,
+                player.getBoundingBox().inflate(DEBRIS_PULL_RADIUS),
+                en -> en.isAlive() && en != player)) {
+
+            Vec3 toPlayer = playerPos.subtract(e.position());
+            double dist = toPlayer.length();
+            if (dist < 0.5 || dist > DEBRIS_PULL_RADIUS) continue;
+
+            double strength = DEBRIS_PULL_STRENGTH * (1.0 - dist / DEBRIS_PULL_RADIUS);
+            Vec3 pull = toPlayer.normalize().scale(strength);
+
+            e.setDeltaMovement(e.getDeltaMovement().add(pull.x, pull.y * 0.3, pull.z));
+            e.hasImpulse = true;
+
+            if (dist <= contactRadius && world.getGameTime() % 10 == 0) {
+                e.hurt(ModDamageTypes.debrisOrbit(world, player), DEBRIS_PULL_DAMAGE);
+            }
+
+            if (world.getGameTime() % 4 == 0) {
+                world.sendParticles(TK_LIGHT_PINK,
+                        e.getX(), e.getY(0.5), e.getZ(),
+                        1, pull.x * 2, pull.y * 2, pull.z * 2, 0.01);
+            }
+        }
+
+        long time = world.getGameTime();
+        for (int ring = 0; ring < 3; ring++) {
+            double ringR = DEBRIS_ORBIT_RADIUS_INNER + ring * 0.8;
+            double ringSpeed = 0.06 + ring * 0.02;
+            double ringDir = (ring % 2 == 0) ? 1 : -1;
+            int auraPoints = 4 + ring * 2;
+
+            for (int i = 0; i < auraPoints; i++) {
+                double a = (time * ringSpeed * ringDir) + (i * Math.PI * 2.0 / auraPoints);
+                world.sendParticles(ring == 0 ? TK_MAGENTA : ring == 1 ? TK_PINK : TK_LIGHT_PINK,
+                        playerPos.x + Math.cos(a) * ringR,
+                        playerPos.y + Math.sin(a * 0.5) * 0.3,
+                        playerPos.z + Math.sin(a) * ringR,
+                        1, 0, 0.015, 0, 0);
+            }
+        }
+    }
+
+    private void throwDebrisProjectile(ServerPlayer player, TKCasterState caster) {
+        DebrisField field = caster.debrisField;
+        if (field == null) return;
+        if (caster.debrisThrowCd > 0) return;
+
+        ServerLevel world = player.serverLevel();
+        if (field.orbitAngles.size() < DEBRIS_THROW_COUNT) {
+            world.playSound(null, player.blockPosition(), SoundEvents.STONE_HIT, player.getSoundSource(), 0.6f, 0.5f);
+            return;
+        }
+
+        Vec3 look = player.getViewVector(1.0f);
+        Vec3 right = new Vec3(-look.z, 0, look.x).normalize();
+        Vec3 up = look.cross(right).normalize();
+
+        int thrown = 0;
+        Iterator<Map.Entry<UUID, Double>> it = field.orbitAngles.entrySet().iterator();
+
+        while (it.hasNext() && thrown < DEBRIS_THROW_COUNT) {
+            Map.Entry<UUID, Double> entry = it.next();
+            UUID uuid = entry.getKey();
+
+            Entity orbitEntity = world.getEntity(uuid);
+            it.remove();
+
+            if (orbitEntity != null && !orbitEntity.isRemoved()) {
+                orbitEntity.setNoGravity(false);
+
+                if (orbitEntity instanceof FallingBlockEntity fb) {
+                    fb.time = 0;
+                    fb.dropItem = false;
+                }
+
+                double spreadH = (thrown == 0) ? 0 : (thrown % 2 == 0 ? 1 : -1) * DEBRIS_THROW_SPREAD * (double)((thrown + 1) / 2);
+                double spreadV = (world.random.nextDouble() - 0.5) * DEBRIS_THROW_SPREAD * 0.5;
+
+                Vec3 vel = look.scale(DEBRIS_THROW_SPEED).add(right.scale(spreadH)).add(up.scale(spreadV));
+                orbitEntity.setDeltaMovement(vel);
+                orbitEntity.hasImpulse = true;
+
+                caster.thrownBlocks.put(uuid, orbitEntity.position());
+
+                spawnImpactRing(world, orbitEntity.position(), 8, 0.25);
+                world.sendParticles(TK_MAGENTA, orbitEntity.getX(), orbitEntity.getY(), orbitEntity.getZ(), 4, 0.2, 0.2, 0.2, 0.06);
+            }
+            thrown++;
+        }
+
+        if (thrown > 0) {
+            caster.debrisThrowCd = DEBRIS_THROW_COOLDOWN;
+            world.playSound(null, player.blockPosition(), SoundEvents.WARDEN_SONIC_BOOM, player.getSoundSource(), 0.8f, 1.1f);
+            world.playSound(null, player.blockPosition(), SoundEvents.STONE_BREAK, player.getSoundSource(), 1.2f, 1.2f);
+        }
+    }
+
+    private void tickThrownBlocks(ServerPlayer player, TKCasterState caster) {
+        if (caster.thrownBlocks.isEmpty()) return;
+
+        ServerLevel world = player.serverLevel();
+        Set<UUID> toExplode = new HashSet<>();
+
+        for (Map.Entry<UUID, Vec3> entry : caster.thrownBlocks.entrySet()) {
+            UUID entityUuid = entry.getKey();
+            Entity ent = world.getEntity(entityUuid);
+
+            if (ent == null || ent.isRemoved()) {
+                triggerDebrisExplosion(player, world, entry.getValue());
+                toExplode.add(entityUuid);
+                continue;
+            }
+
+            entry.setValue(ent.position());
+
+            boolean hitSomething = ent.horizontalCollision || ent.onGround();
+
+            if (hitSomething) {
+                triggerDebrisExplosion(player, world, ent.position());
+                ent.discard();
+                toExplode.add(entityUuid);
+            }
+        }
+
+        toExplode.forEach(caster.thrownBlocks::remove);
+    }
+
+    private void triggerDebrisExplosion(ServerPlayer player, ServerLevel world, Vec3 pos) {
+        for (LivingEntity e : world.getEntitiesOfClass(LivingEntity.class,
+                new AABB(pos, pos).inflate(DEBRIS_THROW_EXPLOSION_RADIUS),
+                en -> en.isAlive() && en != player)) {
+
+            double dist = e.position().distanceTo(pos);
+            if (dist > DEBRIS_THROW_EXPLOSION_RADIUS) continue;
+
+            float damage = DEBRIS_THROW_DAMAGE * (float) (1.0 - dist / DEBRIS_THROW_EXPLOSION_RADIUS);
+            e.hurt(ModDamageTypes.blockThrow(world, player), damage);
+
+            Vec3 knockback = e.position().subtract(pos).normalize().scale(0.8);
+            e.setDeltaMovement(e.getDeltaMovement().add(knockback.x, 0.4, knockback.z));
+            e.hasImpulse = true;
+
+            markForImpactTracking(e, e.getDeltaMovement(), player.getUUID());
+        }
+
+        spawnSlamImpact(world, pos);
+        world.sendParticles(ParticleTypes.EXPLOSION,
+                pos.x, pos.y + 0.5, pos.z, 3, 0.5, 0.3, 0.5, 0.1);
+        for (int i = 0; i < 15; i++) {
+            double a = world.random.nextDouble() * Math.PI * 2;
+            double r = world.random.nextDouble() * 0.8;
+            world.sendParticles(TK_DARK_PINK,
+                    pos.x + Math.cos(a) * r, pos.y + 0.3, pos.z + Math.sin(a) * r,
+                    1, Math.cos(a) * 0.3, 0.2, Math.sin(a) * 0.3, 0.05);
+        }
+
+        world.playSound(null, player.blockPosition(),
+                SoundEvents.GENERIC_EXPLODE.value(), player.getSoundSource(), 0.6f, 0.5f);
+    }
+
+    private void handleDebrisRegen(ServerPlayer player, TKCasterState caster, DebrisField field) {
+        ServerLevel world = player.serverLevel();
+        long time = world.getGameTime();
+
+        long idleTime = time - caster.lastSwingTime;
+
+        if (idleTime < DEBRIS_REGEN_DELAY_TICKS) return;
+        if (time % DEBRIS_REGEN_INTERVAL != 0) return;
+        if (field.orbitAngles.size() >= DEBRIS_MAX_BLOCKS) return;
+
+        int toRegen = Math.min(DEBRIS_REGEN_AMOUNT, DEBRIS_MAX_BLOCKS - field.orbitAngles.size());
+
+        for (int i = 0; i < toRegen; i++) {
+            spawnOrbitBlock(player, world, field);
+        }
+    }
+
+    private void spawnOrbitBlock(ServerPlayer player, ServerLevel world, DebrisField field) {
+        BlockPos pos = player.blockPosition().below();
+        BlockState state = Blocks.STONE.defaultBlockState();
+
+        FallingBlockEntity block = FallingBlockEntity.fall(world, pos, state);
+        block.setNoGravity(true);
+        block.dropItem = false;
+        block.time = -32768;
+
+        field.orbitAngles.put(block.getUUID(), world.random.nextDouble() * Math.PI * 2);
+
+        world.sendParticles(TK_MAGENTA,
+                block.getX(), block.getY(), block.getZ(),
+                6, 0.2, 0.2, 0.2, 0.05);
+
+        world.playSound(null, player.blockPosition(),
+                SoundEvents.STONE_PLACE,
+                player.getSoundSource(), 0.4f, 1.2f);
+    }
+
+    private static Entity resolveOwner(UUID ownerUuid, ServerLevel world) {
+        if (ownerUuid == null) return null;
+        return world.getServer().getPlayerList().getPlayer(ownerUuid);
+    }
+
+    /* ============================================================
+       YAP
+       ============================================================ */
+
+    @Override public String getName()          { return Component.translatable("power.loopypowers.telekinesis.name").getString(); }
+    @Override public String getPassiveName()   { return Component.translatable("power.loopypowers.telekinesis.passive_name").getString(); }
+    @Override public String getPrimaryName()   { return Component.translatable("power.loopypowers.telekinesis.primary_name").getString(); }
+    @Override public String getSecondaryName() { return Component.translatable("power.loopypowers.telekinesis.secondary_name").getString(); }
+    @Override public String getUltimateName()  { return Component.translatable("power.loopypowers.telekinesis.ultimate_name").getString(); }
+
+    @Override public long getPrimaryCooldownMs()   { return 11_000; }
+    @Override public long getSecondaryCooldownMs() { return 24_000; }
+    @Override public long getUltimateCooldownMs()  { return 310_000; }
+
+    @Override
+    public String getOverviewDescription() {
+        return Component.translatable("power.loopypowers.telekinesis.description.overview").getString();
+    }
+
+    @Override
+    public String getPassiveDescription() {
+        return Component.translatable("power.loopypowers.telekinesis.description.passive").getString();
+    }
+
+    @Override
+    public String getPrimaryDescription() {
+        return Component.translatable("power.loopypowers.telekinesis.description.primary").getString();
+    }
+
+    @Override
+    public String getSecondaryDescription() {
+        return Component.translatable("power.loopypowers.telekinesis.description.secondary").getString();
+    }
+
+    @Override
+    public String getUltimateDescription() {
+        return Component.translatable("power.loopypowers.telekinesis.description.ultimate").getString();
+    }
+}

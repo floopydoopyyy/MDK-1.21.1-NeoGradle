@@ -1,0 +1,7 @@
+{
+  "message_id": "loopypowers_thorn",
+  "exhaustion": 0.1,
+  "scaling": "never",
+  "effects": "poking",
+  "death_message_type": "default"
+}

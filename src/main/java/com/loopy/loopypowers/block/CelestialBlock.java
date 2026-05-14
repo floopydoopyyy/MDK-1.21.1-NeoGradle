@@ -1,0 +1,117 @@
+package com.loopy.loopypowers.block;
+
+// import com.loopy.loopypowers.manager.PowerManager;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import org.joml.Vector3f;
+
+public class CelestialBlock extends Block {
+
+    private static final long COOLDOWN_REDUCTION_PER_TICK = 70; // about 25-30% increase
+
+    public CelestialBlock(BlockBehaviour.Properties properties) {
+        super(properties);
+    }
+
+    /* ============================================================
+       COOLDOWN EFFECT
+       ============================================================ */
+
+    @Override
+    public void stepOn(Level level, BlockPos pos, BlockState state, Entity entity) {
+        super.stepOn(level, pos, state, entity);
+
+        if (level.isClientSide) return;
+
+        if (entity instanceof ServerPlayer player) {
+            // TODO: Uncomment once PowerManager is ported
+            // if (PowerManager.getPower(player) == null) return;
+            // PowerManager.reduceAllCooldowns(player, COOLDOWN_REDUCTION_PER_TICK);
+            // spawnCooldownParticles(player);
+        }
+    }
+
+    private void spawnCooldownParticles(ServerPlayer player) {
+        var level = player.serverLevel();
+
+        // player.age becomes player.tickCount
+        if (player.tickCount % 3 != 0) return;
+
+        double px = player.getX();
+        double py = player.getY();
+        double pz = player.getZ();
+
+        DustParticleOptions PURPLE = new DustParticleOptions(new Vector3f(0.7f, 0.3f, 1.0f), 0.8f);
+
+        int points = 4; // fewer particles
+
+        for (int i = 0; i < points; i++) {
+
+            double angle = (player.tickCount * 0.08) + (i * Math.PI * 2 / points); // slower spin
+            double radius = 0.35; // tighter circle
+
+            double x = px + Math.cos(angle) * radius;
+            double z = pz + Math.sin(angle) * radius;
+            double y = py + 0.2 + (i * 0.08); // less vertical stretch
+
+            double vx = Math.cos(angle) * 0.01;
+            double vz = Math.sin(angle) * 0.01;
+
+            // world.spawnParticles becomes level.sendParticles on the server side
+            level.sendParticles(
+                    PURPLE,
+                    x, y, z,
+                    1,
+                    vx, 0.02, vz,
+                    0
+            );
+        }
+    }
+
+    /* ============================================================
+       PARTICLES
+       ============================================================ */
+
+    @Override
+    public void animateTick(BlockState state, Level level, BlockPos pos, RandomSource random) {
+
+        Direction dir = Direction.getRandom(random);
+
+        double x = pos.getX() + 0.5 + dir.getStepX() * 0.55;
+        double y = pos.getY() + 0.5 + dir.getStepY() * 0.55;
+        double z = pos.getZ() + 0.5 + dir.getStepZ() * 0.55;
+
+        x += (random.nextDouble() - 0.5) * 0.3;
+        y += (random.nextDouble() - 0.5) * 0.3;
+        z += (random.nextDouble() - 0.5) * 0.3;
+
+        double vx = dir.getStepX() * 0.05;
+        double vy = dir.getStepY() * 0.05;
+        double vz = dir.getStepZ() * 0.05;
+
+        if (random.nextFloat() < 0.15f) {
+            level.addParticle(
+                    ParticleTypes.END_ROD,
+                    x, y, z,
+                    vx, vy + 0.02, vz
+            );
+        }
+
+        if (random.nextFloat() < 0.8f) {
+            level.addParticle(
+                    new DustParticleOptions(new Vector3f(0.9f, 0.3f, 1.0f), 1.2f),
+                    x, y, z,
+                    vx * 0.5, vy * 0.5 + 0.01, vz * 0.5
+            );
+        }
+    }
+}
