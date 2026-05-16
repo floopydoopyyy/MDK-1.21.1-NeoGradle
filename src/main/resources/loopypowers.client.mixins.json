@@ -4,8 +4,8 @@
 	"package": "com.loopy.loopypowers.client.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"PlayerEntityRendererMixin",
 		"ElytraFeatureRendererMixin",
+		"PlayerEntityRendererMixin",
 		"SoundSystemMixin"
 	],
 	"injectors": {

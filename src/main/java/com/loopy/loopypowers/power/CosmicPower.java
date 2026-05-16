@@ -6,15 +6,14 @@ import com.loopy.loopypowers.entity.BlackHoleEntity;
 import com.loopy.loopypowers.entity.ModEntities;
 import com.loopy.loopypowers.manager.PassiveManager;
 import com.loopy.loopypowers.network.CameraShake;
+import com.loopy.loopypowers.network.payload.FateAuraPayload;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
@@ -25,6 +24,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Vector3f;
 
 import java.util.HashMap;
@@ -88,7 +88,7 @@ public class CosmicPower implements PowerInterface {
 
     @Override
     public void onAssign(ServerPlayer player) {
-        player.getTags().removeIf(tag -> tag.startsWith("cos_")); // getCommandTags -> getTags
+        player.getTags().removeIf(tag -> tag.startsWith("cos_"));
     }
 
     @Override
@@ -103,10 +103,14 @@ public class CosmicPower implements PowerInterface {
         // Instantly remove all targets owned by this player
         Map<UUID, FateInstance> myTargets = ACTIVE_FATES.remove(player.getUUID());
         if (myTargets != null && player.getServer() != null) {
-            for (ServerLevel w : player.getServer().getAllLevels()) { // getWorlds -> getAllLevels
+            for (ServerLevel w : player.getServer().getAllLevels()) {
                 for (UUID targetId : myTargets.keySet()) {
                     Entity e = w.getEntity(targetId);
-                    if (e instanceof LivingEntity le) le.removeEffect(ModEffects.FATE);
+                    if (e instanceof LivingEntity le) {
+                        le.removeEffect(ModEffects.FATE);
+                        // Tell clients to stop rendering
+                        PacketDistributor.sendToPlayersTrackingEntityAndSelf(le, new FateAuraPayload(le.getId(), 0, 0));
+                    }
                 }
             }
         }
@@ -114,7 +118,6 @@ public class CosmicPower implements PowerInterface {
         // Despawn active black holes
         if (player.getServer() != null) {
             for (ServerLevel w : player.getServer().getAllLevels()) {
-                // getEntitiesByClass -> getEntitiesOfClass, Box -> AABB
                 for (BlackHoleEntity bh : w.getEntitiesOfClass(BlackHoleEntity.class, player.getBoundingBox().inflate(150), Entity::isAlive)) {
                     if (player.equals(bh.getOwner())) {
                         bh.discard();
@@ -168,11 +171,11 @@ public class CosmicPower implements PowerInterface {
 
                 // Tick Detonation
                 if (fate.detonateTicks > 0) {
-                    if (fate.storedDamage > 0 && target.tickCount % FATE_DETONATE_INTERVAL == 0) { // age -> tickCount
+                    if (fate.storedDamage > 0 && target.tickCount % FATE_DETONATE_INTERVAL == 0) {
                         int ticks = FATE_DETONATE_TICKS / FATE_DETONATE_INTERVAL;
                         float damagePerTick = fate.storedDamage / ticks;
 
-                        target.hurt(ModDamageTypes.fate(world, player), damagePerTick); // damage -> hurt
+                        target.hurt(ModDamageTypes.fate(world, player), damagePerTick);
                         spawnDetonateParticles(world, target);
                     }
 
@@ -180,7 +183,6 @@ public class CosmicPower implements PowerInterface {
                     if (fate.detonateTicks <= 0) {
                         fate.storedDamage = 0;
                         fate.immuneTicks = FATE_IMMUNE_TICKS;
-                        // target.removeEffect(ModEffects.FATE);
                     }
                     continue;
                 }
@@ -189,15 +191,15 @@ public class CosmicPower implements PowerInterface {
                 if (fate.timerTicks > 0) {
                     fate.timerTicks--;
                     if (fate.timerTicks <= 0) {
+                        // Tell clients to clear the aura so the explosion looks clean
+                        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), 0, 0));
                         fate.detonateTicks = FATE_DETONATE_TICKS;
                         spawnDetonateStartParticles(world, target);
-                        // target.removeEffect(ModEffects.FATE);
                     } else {
-                        spawnFateAuraParticles(world, target, fate);
+                        // Server no longer processes particles here, just syncs the effect!
                         syncFateEffect(target, fate.timerTicks);
                     }
                 } else if (fate.storedDamage <= 0) {
-                    // If it has no timer, no immunity, no detonation, and no damage, clean it up
                     it.remove();
                 }
             }
@@ -223,10 +225,10 @@ public class CosmicPower implements PowerInterface {
     public boolean onAttack(ServerPlayer attacker, LivingEntity target, DamageSource source, float amount) {
         if (!PassiveManager.isEnabled(attacker)) return true;
 
-        if (source.getEntity() != attacker) return true; // getSource() -> getEntity()
+        if (source.getEntity() != attacker) return true;
         if (this.applyingReducedDamage) return true;
 
-        if (source.is(ModDamageTypes.FATE) || source.is(ModDamageTypes.BLACK_HOLE)) return true; // isOf -> is
+        if (source.is(ModDamageTypes.FATE) || source.is(ModDamageTypes.BLACK_HOLE)) return true;
 
         applyMeleeFate(attacker, target, amount);
 
@@ -301,6 +303,8 @@ public class CosmicPower implements PowerInterface {
             fate.timerTicks = Math.min(fate.timerTicks + timerAdd, FATE_TIMER_MAX);
         }
 
+        // Send payload with the updated stored damage and ticks to start/refresh the visual
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));
         syncFateEffect(target, fate.timerTicks);
     }
 
@@ -308,7 +312,6 @@ public class CosmicPower implements PowerInterface {
         UUID targetId = target.getUUID();
         FateInstance fate = null;
 
-        // Find fate instance regardless of who owns it
         for (Map<UUID, FateInstance> playerFates : ACTIVE_FATES.values()) {
             fate = playerFates.get(targetId);
             if (fate != null) break;
@@ -317,86 +320,39 @@ public class CosmicPower implements PowerInterface {
         if (fate == null || fate.timerTicks <= 0 || fate.detonateTicks > 0 || fate.immuneTicks > 0) return;
 
         fate.timerTicks = Math.max(0, fate.timerTicks - Math.round(fate.timerTicks * reduction));
+
+        // Notify clients of the timer deduction so the particles stay perfectly synced
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));
         syncFateEffect(target, fate.timerTicks);
     }
 
-    // ── Status-effect sync ────────────────────────────────────────────────────
     private static void syncFateEffect(LivingEntity entity, int timerTicks) {
         entity.removeEffect(ModEffects.FATE);
         if (timerTicks <= 0) return;
 
         entity.addEffect(new MobEffectInstance(
-                 ModEffects.FATE,
+                ModEffects.FATE,
                 timerTicks,
-                 0,
-                 false,
-                 false,      // hide particles
-                        true        // show icon in HUD
-         ));
+                0,
+                false,
+                false,
+                true
+        ));
     }
 
     // ── Particle helpers ─────────────────────────────────────────────────────
 
-    private void spawnFateAuraParticles(ServerLevel world, LivingEntity entity, FateInstance fate) {
-        int starCount = Mth.clamp((int)fate.storedDamage, 0, 19); // MathHelper -> Mth
-        long time     = entity.level().getGameTime(); // getWorld().getTime() -> level().getGameTime()
-
-        float  timerFraction = (float) fate.timerTicks / FATE_TIMER_MAX;
-        double speed         = 0.05 + (1.0 - timerFraction) * 0.35;
-        double angle         = time * speed;
-        double orbitRadius   = 0.8 + 0.35;
-        int    trailPoints   = (int)(3 + speed * 10);
-
-        for (int t = 0; t < trailPoints; t++) {
-            double trailAngle = angle - (t * 0.15);
-            double cx   = entity.getX() + Math.cos(trailAngle) * orbitRadius;
-            double cz   = entity.getZ() + Math.sin(trailAngle) * orbitRadius;
-            double cy   = entity.getY(0.55); // getBodyY -> getY
-            float  size = 1.2f - (t * 0.08f);
-
-            world.sendParticles(
-                    new DustParticleOptions(new Vector3f(1.0f, 0.5f, 0.1f), Math.max(0.4f, size)),
-                    cx, cy, cz, 1, 0, 0, 0, 0);
-        }
-
-        if (timerFraction < 0.3f) {
-            int flameCount = (int)((0.3f - timerFraction) * 20);
-            for (int i = 0; i < flameCount; i++) {
-                double randAngle = world.random.nextDouble() * Math.PI * 2;
-                double r  = orbitRadius + 0.1 + world.random.nextDouble() * 0.2;
-                double fx = entity.getX() + Math.cos(randAngle) * r;
-                double fz = entity.getZ() + Math.sin(randAngle) * r;
-                double fy = entity.getY(0.55) + world.random.nextDouble() * 0.3;
-                world.sendParticles(ParticleTypes.FLAME, fx, fy, fz, 1,
-                        0.01, 0.02, 0.01, 0.01);
-            }
-        }
-
-        if (entity.tickCount % 3 != 0) return;
-
-        for (int i = 0; i < starCount; i++) {
-            long seed      = entity.getId() * 341873128712L + i * 132897987541L;
-            double offsetX = ((seed >> 16) & 0xFF) / 255.0 * 2.0 - 1.0;
-            double offsetY = ((seed >> 8)  & 0xFF) / 255.0;
-            double offsetZ = ((seed)       & 0xFF) / 255.0 * 2.0 - 1.0;
-            world.sendParticles(ParticleTypes.WHITE_ASH,
-                    entity.getX() + offsetX * 0.8,
-                    entity.getY(offsetY * 1.2),
-                    entity.getZ() + offsetZ * 0.8,
-                    1, 0.01, 0.02, 0.01, 0.001);
-        }
-    }
-
     private void spawnDetonateStartParticles(ServerLevel world, LivingEntity entity) {
-        Vec3 pos = entity.position(); // getPos -> position
+        Vec3 pos = entity.position();
         world.sendParticles(ParticleTypes.FLASH,
-                pos.x, pos.y + 1, pos.z, 3, 0.2, 0.2, 0.2, 0);
-        for (int i = 0; i < 25; i++) {
+                pos.x, pos.y + 1, pos.z, 2, 0.2, 0.2, 0.2, 0);
+
+        for (int i = 0; i < 12; i++) {
             double vx = (world.random.nextDouble() - 0.5) * 0.6;
             double vy = world.random.nextDouble() * 0.6;
             double vz = (world.random.nextDouble() - 0.5) * 0.6;
             world.sendParticles(ParticleTypes.END_ROD,
-                    pos.x, pos.y + 1, pos.z, 1, vx, vy, vz, 0.1);
+                    pos.x, pos.y + 1, pos.z, 0, vx, vy, vz, 1.0);
         }
 
         world.playSound(null, entity.blockPosition(),
@@ -405,15 +361,16 @@ public class CosmicPower implements PowerInterface {
     }
 
     private void spawnDetonateParticles(ServerLevel world, LivingEntity entity) {
-        if (entity.tickCount % 2 != 0) return;
+        if (entity.tickCount % 4 != 0) return;
         Vec3 pos = entity.position();
-        for (int i = 0; i < 6; i++) {
+
+        for (int i = 0; i < 4; i++) {
             double a = world.getGameTime() * 0.3 + i;
             double x = pos.x + Math.cos(a) * 0.8;
             double z = pos.z + Math.sin(a) * 0.8;
             double y = pos.y + 0.8;
-            world.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 1,
-                    (pos.x - x) * 0.2, 0.02, (pos.z - z) * 0.2, 0);
+            world.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 0,
+                    (pos.x - x) * 0.2, 0.02, (pos.z - z) * 0.2, 1.0);
         }
 
         if (entity instanceof ServerPlayer targetPlayer) {
@@ -422,14 +379,15 @@ public class CosmicPower implements PowerInterface {
     }
 
     private static void spawnFateCapParticles(ServerLevel world, LivingEntity entity) {
-        Vec3 pos = entity.position().add(0, entity.getBbHeight() * 0.6, 0); // getHeight -> getBbHeight
-        for (int i = 0; i < 40; i++) {
-            double a     = world.random.nextDouble() * Math.PI * 2;
+        Vec3 pos = entity.position().add(0, entity.getBbHeight() * 0.6, 0);
+
+        for (int i = 0; i < 16; i++) {
+            double a = world.random.nextDouble() * Math.PI * 2;
             double speed = 0.4 + world.random.nextDouble() * 0.6;
-            world.sendParticles(ParticleTypes.END_ROD, pos.x, pos.y, pos.z, 1,
+            world.sendParticles(ParticleTypes.END_ROD, pos.x, pos.y, pos.z, 0,
                     Math.cos(a) * speed,
                     (world.random.nextDouble() - 0.3) * 0.6,
-                    Math.sin(a) * speed, 0.05);
+                    Math.sin(a) * speed, 1.0);
         }
     }
 
@@ -449,7 +407,7 @@ public class CosmicPower implements PowerInterface {
 
         Vec3 origin = player.getEyePosition();
         Vec3 look   = player.getViewVector(1.0f);
-        Vec3 end    = origin.add(look.scale(RAY_RANGE)); // multiply -> scale
+        Vec3 end    = origin.add(look.scale(RAY_RANGE));
 
         var blockHit = world.clip(new ClipContext(
                 origin, end,
@@ -457,7 +415,7 @@ public class CosmicPower implements PowerInterface {
                 ClipContext.Fluid.NONE,
                 player));
         if (blockHit.getType() != HitResult.Type.MISS) {
-            end = blockHit.getLocation(); // getPos() -> getLocation()
+            end = blockHit.getLocation();
         }
 
         spawnCosmicRayParticles(world, origin, end);
@@ -478,8 +436,9 @@ public class CosmicPower implements PowerInterface {
             Vec3 hitPos = hit.get();
             world.sendParticles(ParticleTypes.FLASH,
                     hitPos.x, hitPos.y, hitPos.z, 1, 0.05, 0.05, 0.05, 0);
+
             world.sendParticles(ParticleTypes.END_ROD,
-                    hitPos.x, hitPos.y, hitPos.z, 3, 0.2, 0.2, 0.2, 0.02);
+                    hitPos.x, hitPos.y, hitPos.z, 1, 0.2, 0.2, 0.2, 0.02);
         }
 
         world.playSound(null, player.blockPosition(),
@@ -494,40 +453,42 @@ public class CosmicPower implements PowerInterface {
         if (firstTarget != null) {
             Vec3 hitPos = firstTarget.getBoundingBox().getCenter();
             world.sendParticles(ParticleTypes.FLASH,
-                    hitPos.x, hitPos.y, hitPos.z, 2, 0.1, 0.1, 0.1, 0);
-            for (int i = 0; i < 8; i++) {
+                    hitPos.x, hitPos.y, hitPos.z, 1, 0.1, 0.1, 0.1, 0);
+
+            for (int i = 0; i < 4; i++) {
                 world.sendParticles(ParticleTypes.END_ROD,
-                        hitPos.x, hitPos.y, hitPos.z, 1,
+                        hitPos.x, hitPos.y, hitPos.z, 0,
                         (world.random.nextDouble() - 0.5) * 0.4,
                         world.random.nextDouble() * 0.3,
-                        (world.random.nextDouble() - 0.5) * 0.4, 0.05);
+                        (world.random.nextDouble() - 0.5) * 0.4, 1.0);
             }
         }
     }
 
     private void spawnCosmicRayParticles(ServerLevel world, Vec3 from, Vec3 to) {
-        Vec3 dir  = to.subtract(from);
+        Vec3 dir = to.subtract(from);
         double len = dir.length();
-        Vec3 step = dir.normalize().scale(0.25);
-        int count  = (int)(len / 0.25);
-        Vec3 pos  = from;
+
+        Vec3 step = dir.normalize().scale(0.6);
+        int count = (int)(len / 0.6);
+        Vec3 pos = from;
 
         for (int i = 0; i < count; i++) {
-            double angle  = i * 0.4;
+            double angle = i * 0.4;
             double spiral = 0.08;
             double x = pos.x + Math.cos(angle) * spiral;
             double y = pos.y;
             double z = pos.z + Math.sin(angle) * spiral;
 
             world.sendParticles(
-                    new DustParticleOptions(new Vector3f(0.4f, 0.0f, 0.6f), 1.1f),
+                    new DustParticleOptions(new Vector3f(0.4f, 0.0f, 0.6f), 1.6f),
                     x, y, z, 1, 0, 0, 0, 0);
 
-            if (i % 2 == 0) {
+            if (i % 3 == 0) {
                 world.sendParticles(ParticleTypes.SMOKE, x, y, z, 1,
                         0.01, 0.01, 0.01, 0.01);
             }
-            if (world.random.nextFloat() < 0.25f) {
+            if (world.random.nextFloat() < 0.15f) {
                 world.sendParticles(ParticleTypes.END_ROD, x, y, z, 1,
                         0.02, 0.02, 0.02, 0.01);
             }
@@ -544,7 +505,8 @@ public class CosmicPower implements PowerInterface {
     public void activateSecondary(ServerPlayer player) {
         ServerLevel world = player.serverLevel();
 
-        player.setDeltaMovement(0, 1.2, 0); // setVelocity -> setDeltaMovement
+        player.setDeltaMovement(0, 1.2, 0);
+        player.hurtMarked = true;
         player.hasImpulse = true;
 
         ACTIVE_STARS.put(player.getUUID(), STAR_ARC_TICKS);
@@ -564,15 +526,18 @@ public class CosmicPower implements PowerInterface {
 
         if (velocity.y > 0) {
             Vec3 look = player.getViewVector(1.0f);
-            player.setDeltaMovement(player.getDeltaMovement().add(look.x * 0.02, 0, look.z * 0.02)); // addVelocity -> setDeltaMovement(add)
+            player.setDeltaMovement(player.getDeltaMovement().add(look.x * 0.02, 0, look.z * 0.02));
+            player.hurtMarked = true;
+            player.hasImpulse = true;
             return;
         }
 
         Vec3 look = player.getViewVector(1.0f);
         player.setDeltaMovement(look.x * 1.2, -1.5, look.z * 1.2);
+        player.hurtMarked = true;
         player.hasImpulse = true;
 
-        boolean hitGround = player.onGround() || player.verticalCollision; // isOnGround -> onGround
+        boolean hitGround = player.onGround() || player.verticalCollision;
         if (!hitGround) return;
 
         Vec3 slamPos = player.position();
@@ -596,31 +561,31 @@ public class CosmicPower implements PowerInterface {
                 player.getSoundSource(), 1.0f, 0.8f);
 
         player.setDeltaMovement(0, 0, 0);
+        player.hurtMarked = true;
         player.hasImpulse = true;
         ACTIVE_STARS.remove(player.getUUID());
     }
 
     private void spawnStarTrailParticles(ServerLevel world, ServerPlayer player) {
         Vec3 pos = player.position();
-        for (int i = 0; i < 3; i++) {
-            world.sendParticles(ParticleTypes.END_ROD,
-                    pos.x, pos.y + 0.5, pos.z, 1,
-                    (world.random.nextDouble() - 0.5) * 0.2,
-                    0.05,
-                    (world.random.nextDouble() - 0.5) * 0.2,
-                    0.02);
-        }
+
+        world.sendParticles(ParticleTypes.END_ROD,
+                pos.x, pos.y + 0.5, pos.z, 0,
+                (world.random.nextDouble() - 0.5) * 0.2,
+                0.05,
+                (world.random.nextDouble() - 0.5) * 0.2,
+                1.0);
     }
 
     private void spawnSlamParticles(ServerLevel world, Vec3 pos) {
-        for (int i = 0; i < 30; i++) {
-            double angle = (Math.PI * 2) * i / 30;
+        for (int i = 0; i < 16; i++) {
+            double angle = (Math.PI * 2) * i / 16;
             world.sendParticles(ParticleTypes.END_ROD,
-                    pos.x, pos.y + 0.1, pos.z, 1,
-                    Math.cos(angle) * 0.4, 0.1, Math.sin(angle) * 0.4, 0.05);
+                    pos.x, pos.y + 0.1, pos.z, 0,
+                    Math.cos(angle) * 0.4, 0.1, Math.sin(angle) * 0.4, 1.0);
         }
         world.sendParticles(ParticleTypes.FLASH,
-                pos.x, pos.y + 0.5, pos.z, 3, 0.2, 0.2, 0.2, 0);
+                pos.x, pos.y + 0.5, pos.z, 2, 0.2, 0.2, 0.2, 0);
     }
 
     /* ============================================================
@@ -638,7 +603,7 @@ public class CosmicPower implements PowerInterface {
         bh.setOwner(player);
         bh.setPos(spawnPos.x, spawnPos.y - 1.0, spawnPos.z);
         bh.setTravelDirection(lookDir);
-        world.addFreshEntity(bh); // spawnEntity -> addFreshEntity
+        world.addFreshEntity(bh);
 
         world.playSound(null, player.blockPosition(),
                 SoundEvents.PORTAL_AMBIENT,
@@ -705,7 +670,7 @@ public class CosmicPower implements PowerInterface {
                 en -> en.isAlive() && en != player)) {
             var hit = e.getBoundingBox().inflate(0.3).clip(origin, end);
             if (hit.isPresent()) {
-                double dist = origin.distanceToSqr(hit.get()); // squaredDistanceTo -> distanceToSqr
+                double dist = origin.distanceToSqr(hit.get());
                 if (dist < closestDist) {
                     closestDist = dist;
                     closest = e;

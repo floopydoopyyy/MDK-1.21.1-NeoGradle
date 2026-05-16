@@ -5,6 +5,7 @@ import com.loopy.loopypowers.network.CameraShake;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
@@ -115,7 +116,6 @@ public class FlightPower implements PowerInterface {
     private static void equipWings(ServerPlayer player) {
         ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
 
-        // Assuming ModItems is fully ported to NeoForge DeferredRegisters
         if (chest.is(com.loopy.loopypowers.item.ModItems.WINGS_OF_VALOR.get())) return;
 
         if (!chest.isEmpty()) {
@@ -188,6 +188,10 @@ public class FlightPower implements PowerInterface {
             Vec3 v = victim.getDeltaMovement();
             victim.setDeltaMovement(v.x, Math.min(v.y, HURT_KNOCKOUT_MIN_YVEL), v.z);
             victim.hasImpulse = true;
+
+            // FIX: Sync knock-out velocity
+            victim.hurtMarked = true;
+            victim.connection.send(new ClientboundSetEntityMotionPacket(victim));
 
             // Apply visual Grounded effect using registry
             victim.addEffect(new MobEffectInstance(ModEffects.GROUNDED, HURT_LOCK_DURATION, 0, false, false, true));
@@ -266,6 +270,10 @@ public class FlightPower implements PowerInterface {
         player.setDeltaMovement(boosted);
         player.hasImpulse = true;
 
+        // FIX: Sync dash velocity
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
         getState(player).gustEmpowermentTicks = GUST_EMPOWERMENT_DURATION;
 
         ServerLevel w = player.serverLevel();
@@ -303,6 +311,10 @@ public class FlightPower implements PowerInterface {
 
         player.setDeltaMovement(next);
         player.hasImpulse = true;
+
+        // FIX: Sync dash empowerment velocity
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
         if (state.gustEmpowermentTicks % 3 == 0) {
             player.serverLevel().sendParticles(
@@ -346,6 +358,10 @@ public class FlightPower implements PowerInterface {
         player.setDeltaMovement(v.x, Math.max(v.y, 0.0) + up, v.z);
         player.hasImpulse = true;
 
+        // FIX: Sync updraft velocity
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
         getState(player).glideRequest = true;
     }
 
@@ -382,6 +398,11 @@ public class FlightPower implements PowerInterface {
 
         player.setDeltaMovement(0, 0, 0);
         player.hasImpulse = true;
+
+        // FIX: Sync mid-air freeze
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
         player.fallDistance = 0;
 
         ServerLevel w = player.serverLevel();
@@ -407,6 +428,11 @@ public class FlightPower implements PowerInterface {
 
             player.setDeltaMovement(0, 0, 0);
             player.hasImpulse = true;
+
+            // FIX: Keep player perfectly frozen during charge
+            player.hurtMarked = true;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
             player.fallDistance = 0;
 
             if (state.boomWindup % 2 == 0) {
@@ -428,6 +454,10 @@ public class FlightPower implements PowerInterface {
                 Vec3 launch = dir.scale(BOOM_SPEED);
                 player.setDeltaMovement(launch.x, Math.max(launch.y, 0.05), launch.z);
                 player.hasImpulse = true;
+
+                // FIX: Sync initial dash velocity
+                player.hurtMarked = true;
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
                 world.playSound(null, player.getX(), player.getY(), player.getZ(),
                         SoundEvents.WARDEN_SONIC_BOOM,
@@ -458,6 +488,11 @@ public class FlightPower implements PowerInterface {
 
             player.setDeltaMovement(dir.scale(BOOM_SPEED));
             player.hasImpulse = true;
+
+            // FIX: Enforce dash velocity every tick
+            player.hurtMarked = true;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
             player.fallDistance = 0;
             player.startFallFlying();
 
@@ -486,6 +521,12 @@ public class FlightPower implements PowerInterface {
                     Vec3 knock = away.normalize().scale(0.9).add(0, 0.15, 0);
                     e.setDeltaMovement(e.getDeltaMovement().add(knock.x, knock.y, knock.z));
                     e.hasImpulse = true;
+
+                    // FIX: Sync knockback for pushed players
+                    if (e instanceof ServerPlayer targetPlayer) {
+                        targetPlayer.hurtMarked = true;
+                        targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
+                    }
                 }
             }
 
@@ -654,10 +695,18 @@ public class FlightPower implements PowerInterface {
             Vec3 kb = away.normalize().scale(BOOM_IMPACT_KB).add(0, 0.45, 0);
             e.setDeltaMovement(e.getDeltaMovement().add(kb.x, kb.y, kb.z));
             e.hasImpulse = true;
+
+            if (e instanceof ServerPlayer targetPlayer) {
+                targetPlayer.hurtMarked = true;
+                targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
+            }
         }
         player.addEffect(new MobEffectInstance(ModEffects.GROUNDED, BOOM_KNOCKOUT_DURATION, 0, false, false, true));
         player.setDeltaMovement(0, Math.min(player.getDeltaMovement().y, -0.25), 0);
         player.hasImpulse = true;
+
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
     }
 
     private void clearBoomState(FlightState state) {

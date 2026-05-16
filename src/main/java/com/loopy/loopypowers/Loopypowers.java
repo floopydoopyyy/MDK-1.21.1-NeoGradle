@@ -1,12 +1,14 @@
 package com.loopy.loopypowers;
 
 import com.loopy.loopypowers.block.ModBlocks;
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.entity.ModEntities;
 import com.loopy.loopypowers.item.ModItems;
 import com.loopy.loopypowers.manager.PlayerDataStore;
 import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.network.payload.*;
 import com.loopy.loopypowers.power.*;
 import com.loopy.loopypowers.ritual.RitualManager;
 import com.loopy.loopypowers.sound.ModSounds;
@@ -31,6 +33,8 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 // NeoForge entry point: @Mod replaces ModInitializer.
 // The constructor receives the mod-bus (for registry/setup events) via injection.
@@ -55,6 +59,9 @@ public class Loopypowers {
         ModBlocks.register(modEventBus);
         ModEffects.register(modEventBus);
 
+        // tell bus registration bull fucking shit
+        modEventBus.addListener(this::registerPayloads);
+
         // ── Lifecycle setup (runs after registries are frozen) ──
         modEventBus.addListener(this::commonSetup);
 
@@ -62,6 +69,51 @@ public class Loopypowers {
         NeoForge.EVENT_BUS.register(this);
 
         LOGGER.info("Loopypowers loaded!");
+    }
+
+    private void registerPayloads(final RegisterPayloadHandlersEvent event) {
+        final PayloadRegistrar registrar = event.registrar(MOD_ID);
+
+        registrar.playToClient( // black hole
+                BlackHoleParticlePayload.TYPE,
+                BlackHoleParticlePayload.STREAM_CODEC,
+                ClientPayloadHandler::handleBlackHoleParticles
+        );
+        registrar.playToClient( // fate effect
+                FateAuraPayload.TYPE,
+                FateAuraPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleFateAura
+        );
+        registrar.playToClient( // blood whip
+                BloodWhipPayload.TYPE,
+                BloodWhipPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleBloodWhip
+        );
+        registrar.playToClient( // blood ult
+                BloodBindPayload.TYPE,
+                BloodBindPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleBloodBind
+        );
+        registrar.playToClient( // darkness ult
+                BlackoutFxPayload.TYPE,
+                BlackoutFxPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleBlackoutFx
+        ); // dimensional ult
+        registrar.playToClient(
+                FractureFxPayload.TYPE,
+                FractureFxPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleFractureFx
+        );
+        registrar.playToClient( // explosion ult
+                ExplosionDropZonePayload.TYPE,
+                ExplosionDropZonePayload.STREAM_CODEC,
+                ClientPayloadHandler::handleExplosionDropZone
+        );
+        registrar.playToClient( // fire
+                FireUltPayload.TYPE,
+                FireUltPayload.STREAM_CODEC,
+                ClientPayloadHandler::handleFireUltFx
+        );
     }
 
     /* ============================================================

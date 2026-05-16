@@ -17,6 +17,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -85,7 +86,6 @@ public class BloodClotEntity extends Projectile {
         LivingEntity hitTarget = null;
         double closestDist = Double.MAX_VALUE;
 
-        // getOtherEntities becomes getEntities
         List<Entity> list = this.level().getEntities(this, sweepBox, this::canHitEntity);
         for (Entity e : list) {
             double d = start.distanceToSqr(e.position());
@@ -96,6 +96,7 @@ public class BloodClotEntity extends Projectile {
         }
 
         if (hitTarget != null) {
+            // Using vanilla's native hit routing to avoid double-execution
             this.onHit(new EntityHitResult(hitTarget));
             return;
         }
@@ -109,7 +110,7 @@ public class BloodClotEntity extends Projectile {
         ));
 
         if (blockHit.getType() == HitResult.Type.BLOCK) {
-            splat();
+            this.onHit(blockHit);
             return;
         }
 
@@ -125,16 +126,6 @@ public class BloodClotEntity extends Projectile {
     }
 
     @Override
-    protected void onHit(HitResult hitResult) {
-        super.onHit(hitResult);
-        if (hitResult instanceof EntityHitResult ehr) {
-            onHitEntity(ehr);
-        } else {
-            splat();
-        }
-    }
-
-    @Override
     protected void onHitEntity(EntityHitResult ehr) {
         if (!(ehr.getEntity() instanceof LivingEntity target)) {
             splat();
@@ -143,9 +134,11 @@ public class BloodClotEntity extends Projectile {
 
         final LivingEntity owner = (this.getOwner() instanceof LivingEntity le) ? le : null;
 
+        // Capture bleed state BEFORE dealing hit damage so the passive hook doesn't trick us
+        final boolean wasBleeding = BloodPower.isBleeding(target);
+
         // Apply direct hit damage
         if (hitDamage > 0.0f) {
-            // Using modern hurt() and damageSources()
             DamageSource src = (owner != null)
                     ? owner.damageSources().magic()
                     : target.damageSources().magic();
@@ -154,13 +147,13 @@ public class BloodClotEntity extends Projectile {
 
         // Logic hooked into BloodPower
         if (!this.level().isClientSide && owner instanceof ServerPlayer sp) {
-            if (BloodPower.isBleeding(target)) {
-                // If target is bleeding, consume the bleed for burst damage
+            if (wasBleeding) {
+                // If target was already bleeding, consume the bleed for burst damage
                 BloodPower.popBleed(target, sp);
             } else {
                 // Otherwise, apply debuffs and start bleed
-                target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, slowTicks, 1, true, true));
-                target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, weakTicks, 0, true, true));
+                target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, slowTicks, 2, true, true));
+                target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, weakTicks, 1, true, true));
 
                 // Static methods in BloodPower handle the attribute application
                 BloodPower.applyBleedFromProjectile(
@@ -175,11 +168,22 @@ public class BloodClotEntity extends Projectile {
         splat();
     }
 
+    @Override
+    protected void onHitBlock(BlockHitResult bhr) {
+        super.onHitBlock(bhr);
+        splat(); // Splat when it hits a wall
+    }
+
     private void splat() {
         if (!this.level().isClientSide && this.level() instanceof ServerLevel sw) {
+            // Vanilla damage sparks
             sw.sendParticles(ParticleTypes.DAMAGE_INDICATOR,
                     this.getX(), this.getY(), this.getZ(),
                     8, 0.25, 0.20, 0.25, 0.02);
+
+            sw.sendParticles(BLOOD_DUST,
+                    this.getX(), this.getY(), this.getZ(),
+                    15, 0.3, 0.3, 0.3, 0.05);
         }
         this.discard();
     }

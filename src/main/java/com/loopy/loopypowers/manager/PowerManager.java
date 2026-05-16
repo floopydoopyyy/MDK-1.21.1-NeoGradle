@@ -433,4 +433,15 @@ public class PowerManager {
         COOLDOWN_END_MS.remove(id);
         PLAYER_CD_MULT.remove(id);
     }
+
+    public static boolean areCooldownsDisabled() {
+        return COOLDOWNS_DISABLED;
+    }
+
+    public static int getModifiedCooldownTicks(ServerPlayer player, int baseTicks) {
+        if (COOLDOWNS_DISABLED) return 0;
+
+        double mult = GLOBAL_CD_MULT * PLAYER_CD_MULT.getOrDefault(player.getUUID(), 1.0);
+        return (int) Math.max(0, Math.round(baseTicks * mult));
+    }
 }

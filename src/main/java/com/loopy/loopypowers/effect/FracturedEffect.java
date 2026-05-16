@@ -2,6 +2,7 @@ package com.loopy.loopypowers.effect;
 
 import com.loopy.loopypowers.damage.ModDamageTypes;
 // import com.loopy.loopypowers.network.RenderPackets;
+import com.loopy.loopypowers.network.RenderPackets;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.resources.ResourceLocation;
@@ -49,8 +50,7 @@ public class FracturedEffect extends MobEffect {
             // flicker
             entity.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, 4, 0, true, false, false));
             if (entity instanceof ServerPlayer p) {
-                // TODO: Uncomment once RenderPackets is ported
-                // RenderPackets.hidePlayerFromOthers(p, 4);
+                RenderPackets.hidePlayerFromOthers(p, 4);
             }
 
             // fx

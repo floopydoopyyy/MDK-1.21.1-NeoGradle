@@ -1,15 +1,17 @@
 package com.loopy.loopypowers.client;
 
-import com.loopy.loopypowers.client.fx.HiddenPlayersClient;
-import com.loopy.loopypowers.client.fx.SoundFX;
-import com.loopy.loopypowers.client.fx.StunAudioClient;
+import com.loopy.loopypowers.client.fx.*;
 import com.loopy.loopypowers.entity.ModEntities;
+import com.loopy.loopypowers.item.ModItems;
 import com.loopy.loopypowers.network.AbilityPackets;
 import com.loopy.loopypowers.network.ClientPowerState;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.entity.NoopRenderer;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -17,6 +19,8 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
+import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -33,9 +37,21 @@ public class LoopypowersClient {
     // ============================================================
     // MOD BUS (Initialization, Rendering, Keys, Networking)
     // ============================================================
-    @SuppressWarnings("removal") // Suppresses the NeoForge 1.21.1 deprecation warning for the EventBus
+    @SuppressWarnings("removal")
     @EventBusSubscriber(modid = "loopypowers", bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientModBusEvents {
+
+        @SubscribeEvent
+        public static void registerClientExtensions(RegisterClientExtensionsEvent event) {
+            event.registerItem(new IClientItemExtensions() {
+                private static final ResourceLocation WINGS_TEXTURE =
+                        ResourceLocation.fromNamespaceAndPath("loopypowers", "textures/entity/wings_of_valor.png");
+
+                public ResourceLocation getCustomElytraTexture(ItemStack stack, LivingEntity entity) {
+                    return WINGS_TEXTURE;
+                }
+            }, ModItems.WINGS_OF_VALOR.get());
+        }
 
         @SubscribeEvent
         public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
@@ -100,7 +116,6 @@ public class LoopypowersClient {
                             StunAudioClient.setStun(payload.ticks()))
             );
 
-            // SoundFX logic has been completely abstracted out!
             registrar.playToClient(
                     AbilityPackets.ResonanceTrailPayload.ID,
                     AbilityPackets.ResonanceTrailPayload.CODEC,
@@ -130,7 +145,7 @@ public class LoopypowersClient {
     // ============================================================
     // GAME BUS (Tick Events)
     // ============================================================
-    @SuppressWarnings("removal") // Suppresses the NeoForge 1.21.1 deprecation warning for the EventBus
+    @SuppressWarnings("removal")
     @EventBusSubscriber(modid = "loopypowers", bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
     public static class ClientGameBusEvents {
 
@@ -154,9 +169,12 @@ public class LoopypowersClient {
 
             HiddenPlayersClient.tick();
             StunAudioClient.tick();
-
-            // SoundFX is ticked here!
             SoundFX.tick(client);
+            FateAuraClient.tick(client);
+            BloodFxClient.tick(client);
+            DimensionalFxClient.tick(client);
+            ExplosionFxClient.tick(client);
+            FireFxClient.tick(client);
         }
     }
 

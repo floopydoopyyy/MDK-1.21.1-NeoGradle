@@ -44,7 +44,7 @@
 
   "entity.loopypowers.hamuel": "hamuel",
   "entity.loopypowers.woolliam": "woolliam",
-  "power.loopypowers.dimensional.name": "Interdimensional",
+  "power.loopypowers.interdimensional.name": "Interdimensional",
   "power.loopypowers.interdimensional.passive_name": "Instability",
   "power.loopypowers.interdimensional.primary_name": "Phase Shift",
   "power.loopypowers.interdimensional.secondary_name": "Displace",
@@ -61,9 +61,9 @@
   "power.loopypowers.explosion.secondary_name": "Propulsion Blast",
   "power.loopypowers.explosion.ultimate_name": "Chain Reaction",
   "power.loopypowers.explosion.description.overview": "Explosion is a high damage, combo-based and movement-oriented power, where abilities are intended to be used together to move quickly and deal high amounts of group damage. While also offering some other utilities, like being able to resist all forms of explosion damage, including creepers, end crystals etc. And can also be very destructive.",
-  "power.loopypowers.explosion.description.passive": "You take less explosion damage.",
-  "power.loopypowers.explosion.description.primary": "Ignite yourself, speeding yourself up and explode after a few seconds, damaging anything around you.",
-  "power.loopypowers.explosion.description.secondary": "Shoot an explosion where you are looking. The recoil will send you flying in the direction you shot the blast from. You will still take fall damage after using this. This ability has 2 charges on separate cooldowns.",
+  "power.loopypowers.explosion.description.passive": "You take less explosion and fall damage.",
+  "power.loopypowers.explosion.description.primary": "Ignite yourself, speeding yourself up and giving yourself jump boost, exploding after a few seconds, damaging anything around you.",
+  "power.loopypowers.explosion.description.secondary": "Shoot an explosion where you are looking. The recoil will send you flying in the direction you shot the blast from. You will still take fall damage after using this (but less due to the passive). This ability has 2 charges on separate cooldowns.",
   "power.loopypowers.explosion.description.ultimate": "Shoot yourself in the air with a big explosion at your feet (or shoot yourself when you land if airborne). Each time you land you will explode and be shot up again. On your final explosion, you will briefly pause and do a bigger explosion. These falls will not inflict fall damage and you are free to use other abilities while airborne. Being in water will also pause the fuse (so you will explode when surfacing instead).",
 
   "power.loopypowers.fire.name": "Fire",

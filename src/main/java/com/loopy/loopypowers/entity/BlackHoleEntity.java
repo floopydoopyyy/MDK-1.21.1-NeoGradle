@@ -1,7 +1,7 @@
 package com.loopy.loopypowers.entity;
 
 import com.loopy.loopypowers.damage.ModDamageTypes;
-// import com.loopy.loopypowers.power.CosmicPower;
+import com.loopy.loopypowers.network.payload.BlackHoleParticlePayload;
 import com.loopy.loopypowers.power.CosmicPower;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -21,6 +21,8 @@ import net.minecraft.world.entity.animal.Cow;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.network.PacketDistributor;
+import org.jetbrains.annotations.NotNull;
 import org.joml.Vector3f;
 
 import java.util.List;
@@ -36,38 +38,28 @@ public class BlackHoleEntity extends Entity {
        ============================================================ */
 
     public static final int   LIFESPAN         = 200;  // ticks
-
-    // movement speed per tick
     private static final double TRAVEL_SPEED   = 0.03;
-
-    // chance per tick to spawn a cow if bored
     private static final float MOOVIN_CHANCE   = 0.0003f;
 
     public static final double OUTER_RADIUS    = 25.0;
     public static final double MID_RADIUS      = 16.0;
     public static final double INNER_RADIUS    = 4.0;
 
-    // Pull strengths per ring
     public static final double OUTER_PULL      = 0.02;
     public static final double MID_PULL        = 0.7;
     public static final double INNER_PULL      = 0.17;
 
-    // velocity cap
     private static final double MAX_PULL_SPEED = 0.45;
-
-    // Higher = more circular orbit, Lower = More direct pull
     private static final double ORBIT_TANGENT_MIX = 0.55;
 
-    // Damage applied per tick in inner ring
     public static final float INNER_DAMAGE_PER_TICK = 1.3f;
 
-    // Particles (OPTIMIZED)
-    private static final int   CORE_RINGS       = 5;    // Reduced from 8
-    private static final int   DISC_ARMS        = 3;    // Reduced from 4
-    private static final float DISC_ARM_RADIUS  = 6.0f; // disk size
-    private static final int   OUTER_WISP_COUNT = 8;    // Reduced from 12
+    // Particles (Restored to original density since it's client-side now!)
+    private static final int   CORE_RINGS       = 8;
+    private static final int   DISC_ARMS        = 4;
+    private static final float DISC_ARM_RADIUS  = 6.0f;
+    private static final int   OUTER_WISP_COUNT = 12;
 
-    // particles, last float is size, more central stuff should be bigger
     private static final DustParticleOptions BLACK =
             new DustParticleOptions(new Vector3f(0.02f, 0.0f, 0.05f), 2.8f);
 
@@ -90,7 +82,7 @@ public class BlackHoleEntity extends Entity {
     public BlackHoleEntity(EntityType<?> type, Level level) {
         super(type, level);
         this.setNoGravity(true);
-        this.noPhysics = true; // noClip replaces to noPhysics
+        this.noPhysics = true;
     }
 
     public void setOwner(ServerPlayer owner) {
@@ -120,9 +112,8 @@ public class BlackHoleEntity extends Entity {
             return;
         }
 
-        // Move slowly in the assigned direction
-        Vec3 current = this.position(); // getPos -> position
-        Vec3 newPos = current.add(this.travelDirection.scale(TRAVEL_SPEED)); // multiply -> scale
+        Vec3 current = this.position();
+        Vec3 newPos = current.add(this.travelDirection.scale(TRAVEL_SPEED));
         this.setPos(newPos.x, newPos.y, newPos.z);
 
         ServerLevel world = (ServerLevel) this.level();
@@ -138,15 +129,18 @@ public class BlackHoleEntity extends Entity {
                 double ox = (world.random.nextDouble() - 0.5) * 12.0;
                 double oy = (world.random.nextDouble() - 0.5) * 12.0;
                 double oz = (world.random.nextDouble() - 0.5) * 12.0;
-                moovin.moveTo(center.x + ox, center.y + oy, center.z + oz, world.random.nextFloat() * 360f, 0); // refreshPositionAndAngles -> moveTo
-                moovin.setCustomName(Component.literal("Moovin")); // Text.literal -> Component.literal
-                world.addFreshEntity(moovin); // spawnEntity -> addFreshEntity
+                moovin.moveTo(center.x + ox, center.y + oy, center.z + oz, world.random.nextFloat() * 360f, 0);
+                moovin.setCustomName(Component.literal("Moovin"));
+                world.addFreshEntity(moovin);
             }
         }
 
-        spawnAllParticles(world, center, lifeProgress);
+        // Send payload to clients instead of calculating particles on the server
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                this,
+                new BlackHoleParticlePayload(this.getId(), lifeProgress)
+        );
 
-        // Loop Ambient Sound
         if (life % 30 == 0) {
             playBlackHoleLoop(world, center);
         }
@@ -156,13 +150,12 @@ public class BlackHoleEntity extends Entity {
        pull stuff
        ============================================================ */
 
-    private boolean pullAndDamageEntities(ServerLevel world, Vec3 center) { // applied to closer entities
+    private boolean pullAndDamageEntities(ServerLevel world, Vec3 center) {
         boolean dealtDamage = false;
 
-        // Scan for all entities
         List<Entity> nearby = world.getEntitiesOfClass(
                 Entity.class,
-                new AABB(center, center).inflate(OUTER_RADIUS), // Box -> AABB, expand -> inflate
+                new AABB(center, center).inflate(OUTER_RADIUS),
                 e -> e.isAlive() && e != owner && e != this && !e.isSpectator()
         );
 
@@ -174,7 +167,6 @@ public class BlackHoleEntity extends Entity {
             if (dist <= INNER_RADIUS) {
                 applyOrbitalPull(e, toCenter, dist, INNER_PULL);
 
-                // Only damage and apply effects if it's actually alive
                 if (e instanceof LivingEntity living) {
                     applyInnerRingEffects(world, living);
                     dealtDamage = true;
@@ -191,13 +183,10 @@ public class BlackHoleEntity extends Entity {
         return dealtDamage;
     }
 
-    private void applyOrbitalPull(Entity entity, Vec3 toCenter, double dist, double strength) { // applied to further entities
+    private void applyOrbitalPull(Entity entity, Vec3 toCenter, double dist, double strength) {
         Vec3 inward = toCenter.normalize();
-
-        // tangent — perpendicular to inward on the horizontal plane
         Vec3 tangent = new Vec3(-inward.z, 0, inward.x).normalize();
 
-        // blend - mostly inward close up, more orbital further out
         double tangentMix = ORBIT_TANGENT_MIX * Mth.clamp(dist / MID_RADIUS, 0, 1);
         Vec3 pullDir = inward.scale(1.0 - tangentMix).add(tangent.scale(tangentMix)).normalize();
 
@@ -209,7 +198,7 @@ public class BlackHoleEntity extends Entity {
         }
 
         entity.setDeltaMovement(newVel);
-        entity.hasImpulse = true; // velocityModified -> hasImpulse
+        entity.hasImpulse = true;
 
         if (entity.level() instanceof ServerLevel sw) {
             sw.getChunkSource().broadcastAndSend(entity,
@@ -224,8 +213,6 @@ public class BlackHoleEntity extends Entity {
                     INNER_DAMAGE_PER_TICK
             );
         }
-
-        // drain fate
         CosmicPower.drainFateTimer(entity);
     }
 
@@ -251,26 +238,26 @@ public class BlackHoleEntity extends Entity {
     }
 
     /* ============================================================
-       Particles
+       Particles (CLIENT ONLY NOW)
        ============================================================ */
 
-    private void spawnAllParticles(ServerLevel world, Vec3 center, float lifeProgress) {
-        long time = world.getGameTime(); // getTime -> getGameTime
+    public void spawnClientParticles(float lifeProgress) {
+        Level level = this.level();
+        Vec3 center = this.position();
+        long time = level.getGameTime();
 
-        spawnEventHorizon(world, center, time);
-        spawnAccretionDisk(world, center, time, lifeProgress);
-        spawnInnerVortex(world, center, time);
-        spawnOuterWisps(world, center, time);
+        spawnEventHorizon(level, center, time);
+        spawnAccretionDisk(level, center, time, lifeProgress);
+        spawnInnerVortex(level, center, time);
+        spawnOuterWisps(level, center, time);
 
-        // extra stuff when close to despawning
         if (lifeProgress > 0.75f) {
-            spawnCollapseFlare(world, center, lifeProgress, time);
+            spawnCollapseFlare(level, center, lifeProgress, time);
         }
     }
 
-    private void spawnEventHorizon(ServerLevel world, Vec3 center, long time) {
+    private void spawnEventHorizon(Level level, Vec3 center, long time) {
         for (int ring = 0; ring < CORE_RINGS; ring++) {
-            // Spaced out slightly more to cover the same volume with fewer rings
             double ringRadius = 0.5 + ring * 0.6;
             int pointsInRing = 6 + ring * 2;
             double rotOffset = time * (0.08 + ring * 0.015) * (ring % 2 == 0 ? 1 : -1);
@@ -284,129 +271,114 @@ public class BlackHoleEntity extends Entity {
                 double z = center.z + Math.sin(angle) * ringRadius;
 
                 DustParticleOptions color = (ring < 2) ? BLACK : PURPLE;
-                world.sendParticles(color, x, y, z, 1, 0, 0, 0, 0); // spawnParticles -> sendParticles
+                level.addParticle(color, x, y, z, 0, 0, 0);
             }
         }
     }
 
-    private void spawnAccretionDisk(ServerLevel world, Vec3 center, long time, float lifeProgress) {
-        double baseSpeed = 0.06 + lifeProgress * 0.04; // spins faster near end
+    private void spawnAccretionDisk(Level level, Vec3 center, long time, float lifeProgress) {
+        double baseSpeed = 0.06 + lifeProgress * 0.04;
 
         for (int arm = 0; arm < DISC_ARMS; arm++) {
             double armOffset = arm * (Math.PI * 2.0 / DISC_ARMS);
 
-            // Shorter trail length to save particles
             int trailLength = 10;
             for (int t = 0; t < trailLength; t++) {
                 double trailFraction = (double) t / trailLength;
 
-                // Spiral - angle increases, radius increases with trail position
                 double angle = time * baseSpeed + armOffset - (t * 0.28);
                 double r = 0.9 + trailFraction * (DISC_ARM_RADIUS - 0.9);
-
-                // Slight vertical wave for depth
                 double waveY = Math.sin(angle * 2 + arm) * 0.18 * (1.0 - trailFraction);
 
                 double x = center.x + Math.cos(angle) * r;
                 double y = center.y + 1.0 + waveY;
                 double z = center.z + Math.sin(angle) * r;
 
-                // orange near core, purple at edges
                 DustParticleOptions diskColor = (trailFraction < 0.4) ? ORANGE
                         : (trailFraction < 0.7) ? HOT_ORANGE
                         : LIGHT_PURPLE;
 
-                world.sendParticles(diskColor, x, y, z, 1, 0, 0, 0, 0);
+                level.addParticle(diskColor, x, y, z, 0, 0, 0);
 
-                // Reduced spark density
-                if (t < 3 && world.random.nextFloat() < 0.15f) {
-                    world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                            x, y, z, 1,
-                            (world.random.nextDouble() - 0.5) * 0.05,
-                            (world.random.nextDouble() - 0.5) * 0.05,
-                            (world.random.nextDouble() - 0.5) * 0.05,
-                            0.01);
+                if (t < 3 && level.random.nextFloat() < 0.15f) {
+                    level.addParticle(ParticleTypes.ELECTRIC_SPARK,
+                            x, y, z,
+                            (level.random.nextDouble() - 0.5) * 0.05,
+                            (level.random.nextDouble() - 0.5) * 0.05,
+                            (level.random.nextDouble() - 0.5) * 0.05);
                 }
             }
         }
     }
 
-    private void spawnInnerVortex(ServerLevel world, Vec3 center, long time) {
-        int points = 8; // Reduced from 12
+    private void spawnInnerVortex(Level level, Vec3 center, long time) {
+        int points = 8;
         for (int i = 0; i < points; i++) {
-            // Counter-rotates relative to the disk
             double angle = -(time * 0.14) + (i * Math.PI * 2.0 / points);
-            double r = 0.55 + Math.sin(time * 0.1 + i) * 0.1; // slight pulse
+            double r = 0.55 + Math.sin(time * 0.1 + i) * 0.1;
 
             double x = center.x + Math.cos(angle) * r;
             double y = center.y + 1.0 + Math.sin(angle * 3) * 0.1;
             double z = center.z + Math.sin(angle) * r;
 
-            world.sendParticles(PURPLE, x, y, z, 1, 0, 0, 0, 0);
+            level.addParticle(PURPLE, x, y, z, 0, 0, 0);
         }
     }
 
-    private void spawnOuterWisps(ServerLevel world, Vec3 center, long time) {
-        // spawns at tick offset
+    private void spawnOuterWisps(Level level, Vec3 center, long time) {
         int wispIndex = (int)(time % OUTER_WISP_COUNT);
 
         double angle = time * 0.03 + (wispIndex * Math.PI * 2.0 / OUTER_WISP_COUNT);
-        double r = OUTER_RADIUS * 0.6 + world.random.nextDouble() * OUTER_RADIUS * 0.3;
+        double r = OUTER_RADIUS * 0.6 + level.random.nextDouble() * OUTER_RADIUS * 0.3;
 
         double x = center.x + Math.cos(angle) * r;
-        double y = center.y + 1.0 + (world.random.nextDouble() - 0.5) * 3.0;
+        double y = center.y + 1.0 + (level.random.nextDouble() - 0.5) * 3.0;
         double z = center.z + Math.sin(angle) * r;
 
-        // Velocity directed slightly inward
         double dx = (center.x - x) * 0.01;
         double dz = (center.z - z) * 0.01;
 
-        world.sendParticles(LIGHT_PURPLE, x, y, z, 1, dx, 0.005, dz, 0.008);
+        level.addParticle(LIGHT_PURPLE, x, y, z, dx, 0.005, dz);
     }
 
-    private void spawnCollapseFlare(ServerLevel world, Vec3 center, float lifeProgress, long time) {
-        float intensity = (lifeProgress - 0.75f) / 0.25f; // 0 → 1 in final quarter
+    private void spawnCollapseFlare(Level level, Vec3 center, float lifeProgress, long time) {
+        float intensity = (lifeProgress - 0.75f) / 0.25f;
 
-        // despawn particles
         if (time % 3 == 0) {
             int burstCount = (int)(3 + intensity * 8);
             for (int i = 0; i < burstCount; i++) {
-                double vx = (world.random.nextDouble() - 0.5) * 0.3 * intensity;
-                double vy = (world.random.nextDouble() - 0.5) * 0.2 * intensity;
-                double vz = (world.random.nextDouble() - 0.5) * 0.3 * intensity;
-                world.sendParticles(ParticleTypes.END_ROD,
+                double vx = (level.random.nextDouble() - 0.5) * 0.3 * intensity;
+                double vy = (level.random.nextDouble() - 0.5) * 0.2 * intensity;
+                double vz = (level.random.nextDouble() - 0.5) * 0.3 * intensity;
+                level.addParticle(ParticleTypes.END_ROD,
                         center.x, center.y + 1.0, center.z,
-                        1, vx, vy, vz, 0.05);
+                        vx, vy, vz);
             }
         }
 
-        // Reduced corona ring
         int coronaCount = (int)(intensity * 4);
         for (int i = 0; i < coronaCount; i++) {
-            double angle = world.random.nextDouble() * Math.PI * 2;
-            double r = 0.5 + world.random.nextDouble() * 0.8;
-            world.sendParticles(ORANGE,
+            double angle = level.random.nextDouble() * Math.PI * 2;
+            double r = 0.5 + level.random.nextDouble() * 0.8;
+            level.addParticle(ORANGE,
                     center.x + Math.cos(angle) * r,
-                    center.y + 1.0 + (world.random.nextDouble() - 0.5) * 0.4,
+                    center.y + 1.0 + (level.random.nextDouble() - 0.5) * 0.4,
                     center.z + Math.sin(angle) * r,
-                    1, 0, 0, 0, 0);
+                    0, 0, 0);
         }
     }
 
     /* ============================================================
-       Data (1.21.1 UPDATE)
+       Data
        ============================================================ */
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // 1.21.1 requires the Builder argument
+    protected void defineSynchedData(SynchedEntityData.@NotNull Builder builder) {
     }
 
     @Override
     protected void readAdditionalSaveData(CompoundTag nbt) {
         this.life = nbt.getInt("Life");
-
-        // restore trajectory if chunk reloads
         double dx = nbt.getDouble("DirX");
         double dy = nbt.getDouble("DirY");
         double dz = nbt.getDouble("DirZ");
@@ -416,8 +388,6 @@ public class BlackHoleEntity extends Entity {
     @Override
     protected void addAdditionalSaveData(CompoundTag nbt) {
         nbt.putInt("Life", this.life);
-
-        // save trajectory
         nbt.putDouble("DirX", this.travelDirection.x);
         nbt.putDouble("DirY", this.travelDirection.y);
         nbt.putDouble("DirZ", this.travelDirection.z);

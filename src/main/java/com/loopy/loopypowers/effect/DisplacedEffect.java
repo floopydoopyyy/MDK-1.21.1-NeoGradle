@@ -12,10 +12,16 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.RelativeMovement;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import org.joml.Vector3f;
 
 import java.util.Set;
 
+@EventBusSubscriber(modid = "loopypowers")
 public class DisplacedEffect extends MobEffect {
 
     public DisplacedEffect() {
@@ -34,8 +40,8 @@ public class DisplacedEffect extends MobEffect {
 
         // set velocity to 0
         entity.setDeltaMovement(Vec3.ZERO);
-        entity.hasImpulse = true; // replaces velocityModified
-        entity.fallDistance = 0; // stops fall damage accumulating when frozen
+        entity.hasImpulse = true;
+        entity.fallDistance = 0;
 
         // Lock position using packets (no more camera lock)
         if (entity instanceof ServerPlayer displacedPlayer) {
@@ -44,7 +50,7 @@ public class DisplacedEffect extends MobEffect {
                             displacedPlayer.getX(),
                             displacedPlayer.getY(),
                             displacedPlayer.getZ(),
-                            0f, // 0 with relative flags means no camera snapping!
+                            0f,
                             0f,
                             Set.of(
                                     RelativeMovement.X_ROT,
@@ -53,27 +59,14 @@ public class DisplacedEffect extends MobEffect {
                             0
                     )
             );
-
-            // stop mining
-            displacedPlayer.addEffect(new MobEffectInstance(
-                    MobEffects.DIG_SLOWDOWN, 5, 255, true, false, false));
-
-            // stop actions
-            if (!displacedPlayer.getMainHandItem().isEmpty()) {
-                displacedPlayer.getCooldowns().addCooldown(displacedPlayer.getMainHandItem().getItem(), 5);
-            }
-            displacedPlayer.stopUsingItem();
         }
 
         // invisibility
-        entity.addEffect(new MobEffectInstance(
-                MobEffects.INVISIBILITY, 5, 0, true, false, false));
+        entity.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, 5, 0, true, false, false));
 
-        // stop damage (Resistance is now DAMAGE_RESISTANCE)
-        entity.addEffect(new MobEffectInstance(
-                MobEffects.WEAKNESS, 5, 255, true, false, false));
-        entity.addEffect(new MobEffectInstance(
-                MobEffects.DAMAGE_RESISTANCE, 5, 255, true, false, false));
+        // stop damage
+        entity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 5, 255, true, false, false));
+        entity.addEffect(new MobEffectInstance(MobEffects.DAMAGE_RESISTANCE, 5, 255, true, false, false));
 
         // disable mob ai
         if (entity instanceof Mob mob) {
@@ -97,5 +90,69 @@ public class DisplacedEffect extends MobEffect {
         }
 
         return true;
+    }
+
+    // ============================================================
+    // NEOFORGE EVENTS
+    // ============================================================
+
+    // give ai back on expiration
+    @SubscribeEvent
+    public static void onEffectExpired(MobEffectEvent.Expired event) {
+        if (event.getEffectInstance() != null && event.getEffectInstance().getEffect().value() instanceof DisplacedEffect) {
+            if (event.getEntity() instanceof Mob mob) {
+                mob.setNoAi(false);
+            }
+        }
+    }
+
+    // give ai back when cleared early
+    @SubscribeEvent
+    public static void onEffectRemove(MobEffectEvent.Remove event) {
+        if (event.getEffectInstance() != null && event.getEffectInstance().getEffect().value() instanceof DisplacedEffect) {
+            if (event.getEntity() instanceof Mob mob) {
+                mob.setNoAi(false);
+            }
+        }
+    }
+
+    // deny all attacks
+    @SubscribeEvent
+    public static void onPlayerAttack(AttackEntityEvent event) {
+        if (event.getEntity().hasEffect(ModEffects.DISPLACED)) {
+            event.setCanceled(true);
+        }
+    }
+
+    // deny item usage
+    @SubscribeEvent
+    public static void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
+        if (event.getEntity().hasEffect(ModEffects.DISPLACED)) {
+            event.setCanceled(true);
+        }
+    }
+
+    // deny block interaction
+    @SubscribeEvent
+    public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getEntity().hasEffect(ModEffects.DISPLACED)) {
+            event.setCanceled(true);
+        }
+    }
+
+    // deny block breaking
+    @SubscribeEvent
+    public static void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
+        if (event.getEntity().hasEffect(ModEffects.DISPLACED)) {
+            event.setCanceled(true);
+        }
+    }
+
+    // deny entity interaction (villagers, riding mounts, shearing)
+    @SubscribeEvent
+    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (event.getEntity().hasEffect(ModEffects.DISPLACED)) {
+            event.setCanceled(true);
+        }
     }
 }
