@@ -79,7 +79,7 @@ public class ExplosionPower implements PowerInterface {
     private static final float FALL_DAMAGE_MULT = 0.7f;
 
     // Primary: ignition
-    private static final int IGNITE_FUSE_TICKS = 20 * 5;
+    private static final int IGNITE_FUSE_TICKS = 80;
     private static final float IGNITE_POWER = 4.5f;
     private static final int IGNITE_SPEED_AMP = 1;
     private static final int IGNITE_JUMP_AMP = 2; // Jump Boost Modifier
@@ -119,16 +119,16 @@ public class ExplosionPower implements PowerInterface {
     private static final int ULT_CHARGE_REFRESH_TICKS = 10;
 
     // DAMAGE AND RADII (EXPOSED FOR CLIENT)
-    private static final float IGNITE_DAMAGE = 23.5f;
+    private static final float IGNITE_DAMAGE = 25.5f;
     private static final double IGNITE_DMG_RADIUS = 5.5;
 
-    private static final float BLAST_DAMAGE = 21.0f;
+    private static final float BLAST_DAMAGE = 21.5f;
     private static final double BLAST_DMG_RADIUS = 3.0;
 
-    private static final float ULT_POP_DAMAGE = 22.5f;
-    public static final double ULT_POP_DMG_RADIUS = 4.5;
-    private static final float ULT_FINAL_DAMAGE = 25.0f;
-    public static final double ULT_FINAL_DMG_RADIUS = 6.5;
+    private static final float ULT_POP_DAMAGE = 24.5f;
+    public static final double ULT_POP_DMG_RADIUS = 5.5;
+    private static final float ULT_FINAL_DAMAGE = 28.0f;
+    public static final double ULT_FINAL_DMG_RADIUS = 7.0;
 
     private static final int ULT_LAUNCH_DELAY_TICKS = 2;
     private static final double ULT_LAUNCH_KICK_Y = 0.12;

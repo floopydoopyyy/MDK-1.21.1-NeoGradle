@@ -1,7 +1,7 @@
 package com.loopy.loopypowers.item;
 
-// import com.loopy.loopypowers.manager.PowerManager;
-// import com.loopy.loopypowers.ritual.RitualManager;
+import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.ritual.RitualManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,7 +22,7 @@ public class RefinedCoreItem extends Item {
     }
 
     @Override
-    public boolean isFoil(ItemStack stack) { // hasGlint becomes isFoil
+    public boolean isFoil(ItemStack stack) {
         return true;
     }
 
@@ -47,9 +47,16 @@ public class RefinedCoreItem extends Item {
             return InteractionResultHolder.pass(stack);
         }
 
-        // TODO: Uncomment once systems are ported
-        /*
-        // no power
+        // check if ritual is active
+        if (RitualManager.isActive(player)) {
+            player.displayClientMessage(
+                    Component.translatable("message.loopypowers.ritual.already_active").withStyle(ChatFormatting.RED),
+                    true
+            );
+            return InteractionResultHolder.fail(stack);
+        }
+
+        // Check if they even have a power
         if (PowerManager.getPower(player) == null) {
             player.displayClientMessage(
                     Component.translatable("message.loopypowers.refined_core.no_power").withStyle(ChatFormatting.RED),
@@ -60,29 +67,26 @@ public class RefinedCoreItem extends Item {
 
         int playerLevel = PowerManager.getLevel(player);
 
-        // too high
-        if (playerLevel > 1) {
-            player.displayClientMessage(
-                    Component.translatable("message.loopypowers.refined_core.level_too_high").withStyle(ChatFormatting.RED),
-                    true
-            );
+        // requires exactly one
+        if (playerLevel != 1) {
+            if (playerLevel >= 2) {
+                player.displayClientMessage(
+                        Component.translatable("message.loopypowers.refined_core.level_too_high").withStyle(ChatFormatting.RED),
+                        true
+                );
+            } else {
+                player.displayClientMessage(
+                        Component.translatable("message.loopypowers.refined_core.exception_low").withStyle(ChatFormatting.RED),
+                        true
+                );
+            }
             return InteractionResultHolder.fail(stack);
         }
 
-        // somehow below 1
-        if (playerLevel < 1) {
-            player.displayClientMessage(
-                    Component.translatable("message.loopypowers.refined_core.exception_low").withStyle(ChatFormatting.RED),
-                    true
-            );
-            return InteractionResultHolder.fail(stack);
-        }
-
-        // apply it
+        // Apply it
         RitualManager.startRitual(player, RitualManager.RitualType.REFINED_UPGRADE);
-        */
 
-        // consume item
+        // Consume item
         if (!player.getAbilities().instabuild) {
             stack.shrink(1);
         }

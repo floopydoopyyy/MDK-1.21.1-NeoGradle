@@ -11,11 +11,11 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class ModItemGroups {
-    // 1. Create the register for Creative Tabs
+    // create register
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS =
             DeferredRegister.create(Registries.CREATIVE_MODE_TAB, Loopypowers.MOD_ID);
 
-    // 2. Register the specific tab
+    // register the tab
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> LOOPYPOWERS_GROUP =
             CREATIVE_MODE_TABS.register("loopypowers_group", () -> CreativeModeTab.builder()
                     .icon(() -> new ItemStack(ModItems.CELESTIAL_SHARD.get()))

@@ -8,6 +8,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -136,72 +137,79 @@ public class ShadowStepEntity extends Entity {
     private void teleportBehind(LivingEntity target) {
         if (!(this.level() instanceof ServerLevel world)) return;
 
-        // getRotationVec -> getViewVector
-        Vec3 forward = target.getViewVector(1.0f).normalize();
-        Vec3 behind = target.position().subtract(forward.scale(1.5));
+        // We only care about horizontal forward to consistently get behind them regardless of where they look
+        Vec3 forward = target.getViewVector(1.0f);
+        Vec3 horizForward = new Vec3(forward.x, 0, forward.z).normalize();
+        if (horizForward.lengthSqr() < 1e-5) horizForward = new Vec3(1, 0, 0);
 
-        BlockPos base = BlockPos.containing(behind);
+        Vec3 desired = target.position().subtract(horizForward.scale(1.5));
+        BlockPos base = BlockPos.containing(desired);
 
-        // find safe spot
-        for (int y = -1; y <= 1; y++) {
-            BlockPos pos = base.above(y); // up becomes above
+        Vec3 safePos = desired; // fallback
+        boolean foundSafe = false;
 
-            if (isSafe(world, pos)) {
+        // Try Y-offsets to find a safe spot (prioritize same level, then slightly up/down)
+        int[] order = new int[] { 0, 1, -1, 2, -2, 3, -3 };
+        for (int dy : order) {
+            BlockPos feet = base.above(dy);
+            BlockPos head = feet.above();
+            BlockPos below = feet.below();
 
-                // In NeoForge, we update look logic before teleporting so it carries over
-                faceTarget(owner, target);
+            // Safety Checks
+            boolean feetEmpty = world.getBlockState(feet).getCollisionShape(world, feet).isEmpty();
+            boolean headEmpty = world.getBlockState(head).getCollisionShape(world, head).isEmpty();
+            boolean floorSolid = !world.getBlockState(below).getCollisionShape(world, below).isEmpty();
+            boolean feetSafeFluid = world.getFluidState(feet).isEmpty() || world.getFluidState(feet).is(FluidTags.WATER);
+            boolean headSafeFluid = world.getFluidState(head).isEmpty() || world.getFluidState(head).is(FluidTags.WATER);
 
-                owner.teleportTo(
-                        world,
-                        pos.getX() + 0.5,
-                        pos.getY(),
-                        pos.getZ() + 0.5,
-                        java.util.Set.of(),
-                        owner.getYRot(),
-                        owner.getXRot()
-                );
-                return;
+            if (feetEmpty && headEmpty && floorSolid && feetSafeFluid && headSafeFluid) {
+                safePos = new Vec3(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5);
+                foundSafe = true;
+                break;
             }
         }
 
-        // fallback: teleport slightly above
-        faceTarget(owner, target);
-        owner.teleportTo(
-                world,
-                behind.x,
-                behind.y + 1,
-                behind.z,
-                java.util.Set.of(),
-                owner.getYRot(),
-                owner.getXRot()
-        );
-    }
+        // If no perfect floor found, raycast to at least prevent suffocating in walls
+        if (!foundSafe) {
+            HitResult hit = world.clip(new ClipContext(
+                    target.getEyePosition(),
+                    desired.add(0, target.getEyeHeight(), 0),
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    target
+            ));
 
-    private boolean isSafe(ServerLevel world, BlockPos pos) {
-        return world.getBlockState(pos).isAir()
-                && world.getBlockState(pos.above()).isAir();
-    }
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                safePos = hit.getLocation().add(horizForward.scale(0.5)); // push back towards target slightly
+                safePos = new Vec3(safePos.x, target.getY(), safePos.z);  // retain target's Y level
+            }
+        }
 
-    private void faceTarget(ServerPlayer player, LivingEntity target) {
-        Vec3 playerPos = player.position();
-        Vec3 targetPos = target.position().add(0, target.getBbHeight() * 0.5, 0);
-
-        Vec3 diff = targetPos.subtract(playerPos);
+        // Calculate exact rotation from destination to target's back
+        Vec3 targetCenter = target.position().add(0, target.getBbHeight() * 0.5, 0);
+        Vec3 playerEye = safePos.add(0, owner.getEyeHeight(), 0);
+        Vec3 diff = targetCenter.subtract(playerEye);
 
         double dx = diff.x;
         double dy = diff.y;
         double dz = diff.z;
-
         double horizontalDist = Math.sqrt(dx * dx + dz * dz);
 
         float yaw = (float)(Math.atan2(dz, dx) * (180F / Math.PI)) - 90F;
         float pitch = (float)(-(Math.atan2(dy, horizontalDist) * (180F / Math.PI)));
 
-        player.setYRot(yaw);
-        player.setXRot(pitch);
+        // Teleport the player and set their rotation
+        owner.teleportTo(
+                world,
+                safePos.x,
+                safePos.y,
+                safePos.z,
+                java.util.Set.of(),
+                yaw,
+                pitch
+        );
 
-        // No requestTeleport packet required here
-        // that is actually so cool i should've used this first
+        owner.fallDistance = 0; // reset fall damage safely
     }
 
     @Override protected void defineSynchedData(SynchedEntityData.Builder builder) {}

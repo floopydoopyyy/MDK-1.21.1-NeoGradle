@@ -570,7 +570,7 @@ public class HealingPower implements PowerInterface {
        ULTIMATE - ADAPTIVE SURVIVABILITY
        ============================================================ */
 
-    private static final int ULT_DURATION = 180;
+    private static final int ULT_DURATION = 250;
 
     private static final int EFFECT_REFRESH = 30;
 
@@ -743,7 +743,7 @@ public class HealingPower implements PowerInterface {
 
     @Override public long getPrimaryCooldownMs() { return 33_000; }
     @Override public long getSecondaryCooldownMs() { return 29_000; }
-    @Override public long getUltimateCooldownMs() { return 290_000; }
+    @Override public long getUltimateCooldownMs() { return 350_000; }
 
     @Override
     public String getOverviewDescription() {

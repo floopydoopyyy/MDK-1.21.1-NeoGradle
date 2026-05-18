@@ -1,9 +1,9 @@
 package com.loopy.loopypowers.block;
 
-// import com.loopy.loopypowers.manager.PowerManager;
-// import com.loopy.loopypowers.power.NaturePower;
-// import com.loopy.loopypowers.power.Power;
-// import com.loopy.loopypowers.damage.ModDamageTypes;
+import com.loopy.loopypowers.damage.ModDamageTypes;
+import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.power.NaturePower;
+import com.loopy.loopypowers.power.PowerInterface;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -99,9 +99,8 @@ public class ThornVineBlock extends Block {
     public void entityInside(BlockState state, Level level, BlockPos pos, Entity entity) {
 
         if (entity instanceof ServerPlayer player) {
-            // TODO: Uncomment once PowerManager is ported
-            // Power p = PowerManager.getPower(player);
-            // if (p instanceof NaturePower) return;
+            PowerInterface p = PowerManager.getPower(player);
+            if (p instanceof NaturePower) return;
         }
 
         entity.makeStuckInBlock(state, new Vec3(0.70D, 0.75D, 0.70D));
@@ -114,9 +113,7 @@ public class ThornVineBlock extends Block {
         // entity.age becomes entity.tickCount
         if (entity.tickCount % DAMAGE_INTERVAL_TICKS == 0 && level instanceof ServerLevel sl) {
 
-            // TODO: Replace with ModDamageTypes.thorn(sl) once ported
-            // boolean didHurt = living.hurt(ModDamageTypes.thorn(sl), DAMAGE_AMOUNT);
-            boolean didHurt = living.hurt(sl.damageSources().sweetBerryBush(), DAMAGE_AMOUNT);
+            boolean didHurt = living.hurt(ModDamageTypes.thorn(sl), DAMAGE_AMOUNT);
 
             if (didHurt) {
                 sl.playSound(

@@ -96,12 +96,12 @@ public class SpeedPower implements PowerInterface {
     private static final int    DASH_DURATION_TICKS         = 5;
     private static final double DASH_SPEED                  = 3.2;
     private static final double DASH_MAX_Y                  = 0.45;
-    private static final float  DASH_DAMAGE                 = 6.5f;    // Collision damage
+    private static final float  DASH_DAMAGE                 = 8.5f;    // Collision damage
     private static final double DASH_KNOCKBACK              = 1.35;
     private static final double DASH_KNOCKBACK_Y            = 0.35;
 
     // SECONDARY - PINBALL STRIKE
-    private static final int    PINBALL_MAX_HITS            = 8;       // Max number of dashes
+    private static final int    PINBALL_MAX_HITS            = 15;       // Max number of dashes
     private static final double PINBALL_RADIUS              = 12.0;    // Area of effect around the anchor
     private static final float  PINBALL_DAMAGE              = 12.5f;   // Damage per hit
     private static final double PINBALL_KNOCKBACK           = 0.9;     // Knockback per hit

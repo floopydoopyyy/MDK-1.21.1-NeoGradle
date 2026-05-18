@@ -1,6 +1,7 @@
 package com.loopy.loopypowers.block;
 
 // import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.manager.PowerManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -33,10 +34,9 @@ public class CelestialBlock extends Block {
         if (level.isClientSide) return;
 
         if (entity instanceof ServerPlayer player) {
-            // TODO: Uncomment once PowerManager is ported
-            // if (PowerManager.getPower(player) == null) return;
-            // PowerManager.reduceAllCooldowns(player, COOLDOWN_REDUCTION_PER_TICK);
-            // spawnCooldownParticles(player);
+            if (PowerManager.getPower(player) == null) return;
+            PowerManager.reduceAllCooldowns(player, COOLDOWN_REDUCTION_PER_TICK);
+            spawnCooldownParticles(player);
         }
     }
 

@@ -2,6 +2,8 @@ package com.loopy.loopypowers.effect;
 
 // import com.loopy.loopypowers.network.CameraShake;
 // import com.loopy.loopypowers.network.RenderPackets;
+import com.loopy.loopypowers.network.CameraShake;
+import com.loopy.loopypowers.network.RenderPackets;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.resources.ResourceLocation;
@@ -104,21 +106,18 @@ public class StunEffect extends MobEffect {
                 }
 
                 if (duration > 0) {
-                    // TODO: Uncomment when network is ported
-                    // RenderPackets.sendStunAudio(p, duration);
+                    RenderPackets.sendStunAudio(p, duration);
                 }
             }
 
             p.setSprinting(false);
             p.fallDistance = 0.0f; // prevents fall damage accumulating
-            // TODO: Uncomment when CameraShake is ported
-            // CameraShake.shake(p, 2, 1.9f);
+            CameraShake.shake(p, 2, 1.9f);
 
         } else {
             // Mob Stun Logic
             if (entity instanceof Mob mob) {
                 mob.getNavigation().stop();
-                mob.setTarget(null);
             }
 
             // Lock look direction (prevYaw/prevPitch -> yRotO/xRotO)

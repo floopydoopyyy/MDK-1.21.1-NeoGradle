@@ -104,15 +104,15 @@ public class SoundPower implements PowerInterface {
     private static final double BOLT_SPEED         = 1.7;
 
     // Secondary
-    private static final int    BD_PULSE_COUNT       = 9;
+    private static final int    BD_PULSE_COUNT       = 7;
     private static final int    BD_FINAL_DELAY_TICKS = 6;
     private static final double BD_PULL_RADIUS       = 10.0;
     private static final double BD_FINAL_RADIUS      = 7.0;
-    private static final float  BD_PULL_STRENGTH     = 0.19f;
+    private static final float  BD_PULL_STRENGTH     = 0.21f;
     private static final float  BD_PULL_UP           = 0.02f;
     private static final float  BD_FINAL_KB          = 1.15f;
     private static final float  BD_FINAL_UP          = 0.30f;
-    private static final float  BD_FINAL_DAMAGE      = 15.5f;
+    private static final float  BD_FINAL_DAMAGE      = 16.5f;
     private static final int    BD_FINAL_STUN_TICKS  = 40;
     private static final int    BD_REMOTE_STUN_TICKS = 30;
 

@@ -1,7 +1,7 @@
 package com.loopy.loopypowers.item;
 
-// import com.loopy.loopypowers.manager.PowerManager;
-// import com.loopy.loopypowers.ritual.RitualManager;
+import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.ritual.RitualManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -47,8 +47,15 @@ public class SpaceVestigeItem extends Item {
         if (!level.isClientSide) {
             ServerPlayer player = (ServerPlayer) user;
 
-            // TODO: Uncomment once systems are ported
-            /*
+            // check if ritual is active
+            if (RitualManager.isActive(player)) {
+                player.displayClientMessage(
+                        Component.translatable("message.loopypowers.ritual.already_active").withStyle(ChatFormatting.RED),
+                        true
+                );
+                return InteractionResultHolder.fail(stack);
+            }
+
             // already has the power
             if (PowerManager.getPower(player) != null) {
                 player.displayClientMessage(
@@ -60,7 +67,6 @@ public class SpaceVestigeItem extends Item {
 
             // start ritual
             RitualManager.startRitual(player, RitualManager.RitualType.SPACE_VESTIGE);
-            */
 
             // consume
             if (!player.getAbilities().instabuild) {

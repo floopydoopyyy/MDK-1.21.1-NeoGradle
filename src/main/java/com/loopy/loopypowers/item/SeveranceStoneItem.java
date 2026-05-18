@@ -1,7 +1,7 @@
 package com.loopy.loopypowers.item;
 
-// import com.loopy.loopypowers.manager.PowerManager;
-// import com.loopy.loopypowers.ritual.RitualManager;
+import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.ritual.RitualManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -41,8 +41,15 @@ public class SeveranceStoneItem extends Item {
             return InteractionResultHolder.pass(stack);
         }
 
-        // TODO: Uncomment once systems are ported
-        /*
+        // check if ritual is active
+        if (RitualManager.isActive(player)) {
+            player.displayClientMessage(
+                    Component.translatable("message.loopypowers.ritual.already_active").withStyle(ChatFormatting.RED),
+                    true
+            );
+            return InteractionResultHolder.fail(stack);
+        }
+
         // No power
         if (PowerManager.getPower(player) == null) {
             player.displayClientMessage(Component.translatable("message.loopypowers.severance_stone.no_power").withStyle(ChatFormatting.RED), true);
@@ -57,7 +64,6 @@ public class SeveranceStoneItem extends Item {
 
         // begin and consume
         RitualManager.startRitual(player, RitualManager.RitualType.SEVERANCE_RITUAL);
-        */
 
         // consume (instabuild is the Mojmap name for creativeMode)
         if (!player.getAbilities().instabuild) {

@@ -4,6 +4,7 @@ import com.loopy.loopypowers.block.ModBlocks;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.entity.ModEntities;
+import com.loopy.loopypowers.item.ModItemGroups;
 import com.loopy.loopypowers.item.ModItems;
 import com.loopy.loopypowers.manager.PlayerDataStore;
 import com.loopy.loopypowers.manager.PowerManager;
@@ -43,22 +44,15 @@ public class Loopypowers {
     public static final Logger LOGGER  = LoggerFactory.getLogger(MOD_ID);
 
     public Loopypowers(IEventBus modEventBus) {
-
-        // ── Deferred registers: each must subscribe to the MOD event bus ──
-        // The individual register() methods should internally call
-        // DeferredRegister.register(modEventBus) — update each helper class
-        // to accept an IEventBus parameter if they don't already.
         ModEntities.register(modEventBus);
         ModSounds.register(modEventBus);
-        // ModItems.register() is a plain class-loading hook with no IEventBus param;
-        // items piggyback on ModBlocks.ITEMS so just touch the class to load it.
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
         ModEffects.register(modEventBus);
+        ModItemGroups.register(modEventBus);
 
         // ── Lifecycle setup (runs after registries are frozen) ──
         modEventBus.addListener(this::commonSetup);
-
         // ── Game-world event listeners ──
         NeoForge.EVENT_BUS.register(this);
 

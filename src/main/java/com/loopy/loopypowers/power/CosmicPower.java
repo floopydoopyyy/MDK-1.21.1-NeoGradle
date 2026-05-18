@@ -80,7 +80,8 @@ public class CosmicPower implements PowerInterface {
 
     // ── Ultimate tuning ───────────────────────────────────────────────────────
 
-    private static final float  BH_TIMER_REDUCTION = 1.5f;
+    // Changed from 1.5f (150% reduction) to a flat 5 extra ticks drained per game tick
+    private static final int    BH_TIMER_REDUCTION = 5;
 
     /* ============================================================
        LIFECYCLE
@@ -319,9 +320,28 @@ public class CosmicPower implements PowerInterface {
 
         if (fate == null || fate.timerTicks <= 0 || fate.detonateTicks > 0 || fate.immuneTicks > 0) return;
 
-        fate.timerTicks = Math.max(0, fate.timerTicks - Math.round(fate.timerTicks * reduction));
+        // FIXED: Math.max(1, ...) prevents it freezing at 0, allowing onTick to detonate it naturally
+        fate.timerTicks = Math.max(1, fate.timerTicks - Math.round(fate.timerTicks * reduction));
 
         // Notify clients of the timer deduction so the particles stay perfectly synced
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));
+        syncFateEffect(target, fate.timerTicks);
+    }
+
+    public static void drainFateTimer(LivingEntity target) {
+        UUID targetId = target.getUUID();
+        FateInstance fate = null;
+
+        for (Map<UUID, FateInstance> playerFates : ACTIVE_FATES.values()) {
+            fate = playerFates.get(targetId);
+            if (fate != null) break;
+        }
+
+        if (fate == null || fate.timerTicks <= 0 || fate.detonateTicks > 0 || fate.immuneTicks > 0) return;
+
+        // Flat drain per tick makes it visually fast-forward rather than popping instantly
+        fate.timerTicks = Math.max(1, fate.timerTicks - BH_TIMER_REDUCTION);
+
         PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));
         syncFateEffect(target, fate.timerTicks);
     }
@@ -613,10 +633,6 @@ public class CosmicPower implements PowerInterface {
                 player.getSoundSource(), 0.6f, 0.5f);
 
         player.swing(InteractionHand.MAIN_HAND, true);
-    }
-
-    public static void drainFateTimer(LivingEntity target) {
-        reduceFateTimer(target, BH_TIMER_REDUCTION);
     }
 
     /* ============================================================

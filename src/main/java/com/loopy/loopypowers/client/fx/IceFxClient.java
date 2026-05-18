@@ -39,8 +39,7 @@ public class IceFxClient {
     private static final double BEAM_SPIRAL_RADIUS    = 0.15;
 
     /* ================================================================
-       FREEZE STAGE AURA  (IceFreezeStagePayload)
-       Called every tick per frozen entity.
+       FREEZE STAGE AURA
     ================================================================ */
 
     public static void onFreezeStage(int entityId, int stage, long gameTime) {
@@ -73,44 +72,16 @@ public class IceFxClient {
         if (stage >= 5) onShatterReady(level, e, p, hw, hh, speed, gameTime);
     }
 
-    /** Rotating halo ring + sparkle for stage 5 "shatter ready" state. */
+    /** Dense blue dust aura for stage 5 "shatter ready" state. */
     private static void onShatterReady(ClientLevel level, LivingEntity e, Vec3 p,
-                                        double hw, double hh, double speed, long gameTime) {
-        // Dense aura
-        for (int i = 0; i < 5; i++) spawnAt(level, FRZ_BLUE_DUST,    p, hw, hh, speed * 1.5);
+                                       double hw, double hh, double speed, long gameTime) {
+        // Dense aura of just blue/shimmer dust
+        for (int i = 0; i < 8; i++) spawnAt(level, FRZ_BLUE_DUST,    p, hw, hh, speed * 1.5);
         for (int i = 0; i < 4; i++) spawnAt(level, FRZ_SHIMMER_DUST, p, hw, hh, speed * 1.5);
 
+        // A little bit of ambient snow to keep the ice theme
         if ((gameTime % 4) == 0) {
-            spawnAt(level, ParticleTypes.END_ROD, p, hw, hh, speed * 2.0);
-            for (int i = 0; i < 4; i++) {
-                Vec3 ep = p.add(0, -0.2, 0);
-                level.addParticle(ParticleTypes.ENCHANT,
-                        ep.x + (Math.random() - 0.5) * hw * 2,
-                        ep.y + (Math.random() - 0.5) * hh * 2,
-                        ep.z + (Math.random() - 0.5) * hw * 2,
-                        0, 0, 0);
-            }
-        }
-
-        // Rotating halo ring — only every other tick (matches server guard)
-        if ((gameTime & 1) == 1) return;
-        Vec3 c = e.position().add(0, e.getBbHeight() * 0.72, 0);
-        double baseAng = gameTime * 0.35;
-        double r = 0.55 + 0.06 * Math.sin(gameTime * 0.45);
-        int points = 14;
-        for (int i = 0; i < points; i++) {
-            double a = baseAng + (i * (Math.PI * 2.0 / points));
-            double x = c.x + Math.cos(a) * r;
-            double z = c.z + Math.sin(a) * r;
-            double y = c.y + Math.sin(a * 2.0) * 0.05;
-            level.addParticle(ParticleTypes.END_ROD, x, y, z, 0, 0, 0);
-            if ((i % 2) == 0) level.addParticle(FRZ_SHIMMER_DUST,          x, y, z, 0.02, 0.02, 0.02);
-            if ((i % 3) == 0) level.addParticle(FRZ_BLUE_DUST,             x, y, z, 0.02, 0.02, 0.02);
-            if ((i % 4) == 0) level.addParticle(ParticleTypes.ELECTRIC_SPARK, x, y, z, 0.02, 0.02, 0.02);
-        }
-        if ((gameTime % 6) == 0) {
-            for (int i = 0; i < 6;  i++) spawnAt(level, ParticleTypes.ENCHANT,   c.add(0, -0.15, 0), 0.25, 0.22, 0);
-            for (int i = 0; i < 10; i++) spawnAt(level, ParticleTypes.SNOWFLAKE, c.add(0, -0.15, 0), 0.28, 0.22, 0);
+            for (int i = 0; i < 5; i++) spawnAt(level, ParticleTypes.SNOWFLAKE, p.add(0, -0.15, 0), hw * 1.2, hh, 0);
         }
     }
 
@@ -143,8 +114,8 @@ public class IceFxClient {
     ================================================================ */
 
     public static void onSpikeTrail(double startX, double startZ,
-                                     double targetX, double targetZ,
-                                     float progress, int seed, int yHint) {
+                                    double targetX, double targetZ,
+                                    float progress, int seed, int yHint) {
         ClientLevel level = Minecraft.getInstance().level;
         if (level == null) return;
 
@@ -214,8 +185,8 @@ public class IceFxClient {
     ================================================================ */
 
     public static void onBeamFire(double startX, double startY, double startZ,
-                                   double endX,   double endY,   double endZ,
-                                   long gameTime) {
+                                  double endX,   double endY,   double endZ,
+                                  long gameTime) {
         ClientLevel level = Minecraft.getInstance().level;
         if (level == null) return;
 
@@ -240,7 +211,7 @@ public class IceFxClient {
 
             double ang   = (gameTime * 0.45) + (i * 0.65);
             Vec3   swirl = p.add(right.scale(Math.cos(ang) * BEAM_SPIRAL_RADIUS))
-                            .add(up2.scale(Math.sin(ang) * BEAM_SPIRAL_RADIUS));
+                    .add(up2.scale(Math.sin(ang) * BEAM_SPIRAL_RADIUS));
             level.addParticle(ParticleTypes.SNOWFLAKE, swirl.x, swirl.y, swirl.z, 0, 0, 0);
 
             if ((i % 10) == 0) level.addParticle(ParticleTypes.ELECTRIC_SPARK, p.x, p.y, p.z, 0.03, 0.03, 0.03);
@@ -340,7 +311,7 @@ public class IceFxClient {
 
     /** Scatters a particle uniformly within a spread box centred on p. */
     private static void spawnAt(ClientLevel level, net.minecraft.core.particles.ParticleOptions type,
-                                  Vec3 p, double hw, double hh, double speed) {
+                                Vec3 p, double hw, double hh, double speed) {
         level.addParticle(type,
                 p.x + (Math.random() * 2 - 1) * hw,
                 p.y + (Math.random() * 2 - 1) * hh,

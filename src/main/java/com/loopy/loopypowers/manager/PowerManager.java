@@ -265,11 +265,10 @@ public class PowerManager {
             return;
         }
 
-        // TODO: Uncomment ModEffects.DISPLACED when ported
-        // if (player.hasEffect(ModEffects.DISPLACED)) {
-        //    CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
-        //    return;
-        // }
+        if (player.hasEffect(ModEffects.DISPLACED)) {
+            CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
+            return;
+        }
 
         // Level check
         if (getLevel(player) < 2) {
@@ -295,11 +294,10 @@ public class PowerManager {
             return;
         }
 
-        // TODO: Uncomment ModEffects.DISPLACED when ported
-        // if (player.hasEffect(ModEffects.DISPLACED)) {
-        //    CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
-        //    return;
-        // }
+        if (player.hasEffect(ModEffects.DISPLACED)) {
+           CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
+            return;
+        }
 
         // Level check
         if (getLevel(player) < 3) {
