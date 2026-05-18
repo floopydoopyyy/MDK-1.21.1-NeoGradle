@@ -3,6 +3,7 @@ package com.loopy.loopypowers.block;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -10,6 +11,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.PointedDripstoneBlock;
@@ -151,4 +153,22 @@ public class IceSpikeBlock extends PointedDripstoneBlock {
             level.addParticle(ICE_SHIMMER, x, y, z, 0.0, 0.01, 0.0);
         }
     }
-}
+
+    // MELTING
+    @Override
+    public void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+        // use super so other stuff still happens
+        super.randomTick(state, level, pos, random);
+
+        // melt in ice
+        if (level.getBrightness(LightLayer.BLOCK, pos) > 11) {
+            this.melt(state, level, pos);
+        }
+    }
+
+    protected void melt(BlockState state, ServerLevel level, BlockPos pos) {
+        // make water in non warm dimensions
+        // no that old comment is a lie that was even more annoying
+            level.removeBlock(pos, false);
+        }
+    }

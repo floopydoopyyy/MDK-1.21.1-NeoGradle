@@ -3,6 +3,7 @@ package com.loopy.loopypowers.power;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
 import com.loopy.loopypowers.network.CameraShake;
+import com.loopy.loopypowers.network.payload.HealingUltPayload;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -20,6 +21,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Vector3f;
 
 import java.util.HashMap;
@@ -190,122 +192,45 @@ public class HealingPower implements PowerInterface {
     @Override
     public void activatePrimary(ServerPlayer player) {
         ServerLevel w = player.serverLevel();
-
         int removed = 0; // how many debuffs purged
 
-        // POWER-BASED DEBUFFS
-        removed += removeBleed(player) ? 1 : 0;
-        removed += NaturePower.cleanseVines(player) ? 1 : 0;
+        // power-based effects
+        if (BloodPower.cleanseBleed(player)) removed++;
+        if (FortunePower.cleanseDuel(player)) removed++;
+        if (CosmicPower.cleanseFate(player)) removed++;
+        if (IcePower.cleanseFreeze(player)) removed++;
+        if (SoundPower.cleanseResonance(player)) removed++;
+        if (PsychicPower.cleansePsychic(player)) removed++;
+        if (TelekinesisPower.cleanseTelekinesis(player)) removed++;
+        if (NaturePower.cleanseVines(player)) removed++;
 
-        // Legacy string tag cleansing (Will need updating as other powers get optimized to maps)
-        // i forgot to do this lol
-        removed += removeTagEffects(player,
-                "sd_resonated_", "sd_dampened_",
-                "ice_frz_p_", "ice_frz_d_",
-                "int_displaced_", "psy_compel_", "psy_ult_ctrl_",
-                "cos_fate_dmg_", "cos_fate_timer_", "cos_fate_deton_",
-                "tk_suspend_", "tk_choke_"
-        );
-
-        // copy effects safely using active statuses
+        // vanilla effects
         for (Holder<MobEffect> effectType : new java.util.ArrayList<>(player.getActiveEffectsMap().keySet())) {
-
-            // keep the good stuff
             if (effectType.value().getCategory() == MobEffectCategory.BENEFICIAL) continue;
-
             player.removeEffect(effectType);
             removed++;
         }
 
         if (player.isOnFire()) {
-            player.clearFire(); // removes fire
+            player.clearFire();
             removed++;
         }
 
-        // Heal based on removed effects
         float healAmount = 4.0f + (removed * 2.0f);
-        // cap the heals
         if (healAmount > 10) {
             healAmount = 10;
         }
         player.heal(healAmount);
 
-        // particles
-        w.sendParticles(
-                ParticleTypes.ELECTRIC_SPARK,
-                player.getX(),
-                player.getY() + player.getBbHeight() * 0.5,
-                player.getZ(),
-                40,
-                0.6, 0.8, 0.6,
-                0.05
-        );
+        w.sendParticles(ParticleTypes.ELECTRIC_SPARK, player.getX(), player.getY() + player.getBbHeight() * 0.5, player.getZ(), 40, 0.6, 0.8, 0.6, 0.05);
+        w.sendParticles(ParticleTypes.FLASH, player.getX(), player.getY() + player.getBbHeight() * 0.5, player.getZ(), 3, 0.7, 0.9, 0.7, 0.1);
+        w.sendParticles(HEAL_DUST, player.getX(), player.getY() + player.getBbHeight() * 0.5, player.getZ(), 30, 0.6, 0.8, 0.6, 0.05);
 
-        w.sendParticles(
-                ParticleTypes.FLASH,
-                player.getX(),
-                player.getY() + player.getBbHeight() * 0.5,
-                player.getZ(),
-                3,
-                0.7, 0.9, 0.7,
-                0.1
-        );
+        w.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, player.getSoundSource(), 0.8f, 0.6f);
+        w.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.AMETHYST_BLOCK_RESONATE, player.getSoundSource(), 0.6f, 1.2f);
 
-        w.sendParticles(
-                HEAL_DUST,
-                player.getX(),
-                player.getY() + player.getBbHeight() * 0.5,
-                player.getZ(),
-                30,
-                0.6, 0.8, 0.6,
-                0.05
-        );
-
-        // sound
-        w.playSound(null, player.getX(), player.getY(), player.getZ(),
-                SoundEvents.PLAYER_LEVELUP,
-                player.getSoundSource(),
-                0.8f, 0.6f);
-
-        w.playSound(null, player.getX(), player.getY(), player.getZ(),
-                SoundEvents.AMETHYST_BLOCK_RESONATE,
-                player.getSoundSource(),
-                0.6f, 1.2f);
-
-        // effects
-        player.addEffect(new MobEffectInstance(
-                MobEffects.GLOWING,
-                10,
-                0,
-                true, false, true
-        ));
-
+        player.addEffect(new MobEffectInstance(MobEffects.GLOWING, 10, 0, true, false, true));
         player.swing(InteractionHand.MAIN_HAND, true);
-    }
-
-    // cleanse power-based effects
-    private static int removeTagEffects(ServerPlayer player, String... prefixes) {
-        int removed = 0;
-
-        Iterator<String> it = player.getTags().iterator();
-
-        while (it.hasNext()) {
-            String tag = it.next();
-
-            for (String prefix : prefixes) {
-                if (tag.startsWith(prefix)) {
-                    it.remove();
-                    removed++;
-                    break;
-                }
-            }
-        }
-
-        return removed;
-    }
-
-    public static boolean removeBleed(LivingEntity e) {
-        return ACTIVE_BLEEDS.remove(e.getUUID()) != null;
     }
 
     /* ============================================================
@@ -649,7 +574,7 @@ public class HealingPower implements PowerInterface {
 
     private static final int EFFECT_REFRESH = 30;
 
-    private static final float MEDIC_SOUND_CHANCE = 0.5f;
+    private static final float MEDIC_SOUND_CHANCE = 0.05f;
 
     // lifesteal scaling
     private static final float LS_HIGH = 0.35f;
@@ -684,58 +609,24 @@ public class HealingPower implements PowerInterface {
         state.ultTicks--;
         ServerLevel w = player.serverLevel();
 
-        // constant particles
-        w.sendParticles(
-                ParticleTypes.FIREWORK,
-                player.getX(),
-                player.getY() + player.getBbHeight() * 0.5,
-                player.getZ(),
-                2,              // low count
-                0.4, 0.6, 0.4,  // spread
-                0.01
-        );
-
-        w.sendParticles(
-                HEAL_DUST,
-                player.getX(),
-                player.getY() + player.getBbHeight() * 0.5,
-                player.getZ(),
-                3,
-                0.5, 0.6, 0.5,
-                0.02
-        );
-
-        // occasional other
-        if (state.ultTicks % 10 == 0) {
-            w.sendParticles(
-                    ParticleTypes.END_ROD,
-                    player.getX(),
-                    player.getY() + player.getBbHeight() * 0.5,
-                    player.getZ(),
-                    8,
-                    0.6, 0.8, 0.6,
-                    0.05
-            );
-        }
-
+        // Ult just expired — clean up and exit before sending any FX
         if (state.ultTicks <= 0) {
-            // FULL CLEANUP
             state.lifesteal = 0f;
             state.smoothing = 0f;
             state.ultPhase = -1;
             return;
         }
 
+        // Phase detection (done before FX dispatch so the payload carries the right phase)
         float hpPercent = player.getHealth() / player.getMaxHealth();
-
         int phase = getPhase(hpPercent);
         int prevPhase = state.ultPhase;
+        boolean isPhaseChange = (phase != prevPhase);
 
-        // detect phase change
-        if (phase != prevPhase) {
+        if (isPhaseChange) {
             state.ultPhase = phase;
 
-            if (phase == 1) { // EXPOSED ENTRY BURST
+            if (phase == 1) { // EXPOSED ENTRY
                 player.addEffect(new MobEffectInstance(
                         MobEffects.MOVEMENT_SPEED,
                         40,
@@ -743,17 +634,9 @@ public class HealingPower implements PowerInterface {
                         true, false, true
                 ));
 
-                w.sendParticles(
-                        ParticleTypes.FLASH,
-                        player.getX(),
-                        player.getY() + player.getBbHeight() * 0.5,
-                        player.getZ(),
-                        10,
-                        0.5, 0.6, 0.5,
-                        0.1
-                );
-
-                net.minecraft.sounds.SoundEvent sound = w.random.nextFloat() < MEDIC_SOUND_CHANCE ? ModSounds.MEDIC.get() : SoundEvents.ENDER_DRAGON_FLAP;
+                net.minecraft.sounds.SoundEvent sound = w.random.nextFloat() < MEDIC_SOUND_CHANCE
+                        ? ModSounds.MEDIC.get()
+                        : SoundEvents.ENDER_DRAGON_FLAP;
 
                 w.playSound(null, player.getX(), player.getY(), player.getZ(),
                         sound,
@@ -764,7 +647,18 @@ public class HealingPower implements PowerInterface {
             }
         }
 
+        // Dispatch all particle FX to clients
+        spawnHealingUltFx(player, phase, state.ultTicks, isPhaseChange);
+
         applyPhaseEffects(player, state, phase, state.ultTicks);
+    }
+
+    /** Sends the healing ult FX payload to the caster and all nearby observers. */
+    private static void spawnHealingUltFx(ServerPlayer player, int phase, int ultTicks, boolean isPhaseChange) {
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                player,
+                new HealingUltPayload(player.getId(), phase, ultTicks, isPhaseChange)
+        );
     }
 
     private void applyPhaseEffects(ServerPlayer player, HealingState state, int phase, int ticks) {

@@ -20,6 +20,8 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LightningBolt;
 import com.loopy.loopypowers.damage.ModDamageTypes;
+import com.loopy.loopypowers.network.payload.StormCloudPayload;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -681,8 +683,13 @@ public class LightningPower implements PowerInterface {
                 SoundEvents.LIGHTNING_BOLT_THUNDER,
                 player.getSoundSource(), 1.2f, 0.8f);
 
-        // ult activation — big radial burst
+        // Activation burst — spark/ring FX stay server-side; cloud reveal is client-side
         spawnMaelstromOpenBurst(w, player);
+
+        // Send the activation cloud burst to all clients in range
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                player, new StormCloudPayload(player.getId(), STORM_DURATION_TICKS, true)
+        );
     }
 
     // massive burst when ult activates
@@ -736,8 +743,12 @@ public class LightningPower implements PowerInterface {
             return;
         }
 
-        // Clouds
-        if (state.stormTicks % 6 == 0) spawnStormClouds(world, center);
+        // Send cloud FX to all nearby clients every 6 ticks
+        if (state.stormTicks % 6 == 0) {
+            PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                    player, new StormCloudPayload(player.getId(), state.stormTicks, false)
+            );
+        }
 
         // Targets inside radius
         AABB box = new AABB(center, center).inflate(STORM_RADIUS);
@@ -780,46 +791,6 @@ public class LightningPower implements PowerInterface {
                 second = targets.get(RNG.nextInt(targets.size()));
             }
             if (second != first) strikeStormTarget(world, player, second);
-        }
-    }
-
-    // black stormclouds with yellow
-    private void spawnStormClouds(ServerLevel world, Vec3 center) {
-
-        for (int i = 0; i < 80; i++) { // number of clouds
-            double ang = RNG.nextDouble() * Math.PI * 2.0;
-            double rad = RNG.nextDouble() * STORM_RADIUS;
-
-            double x = center.x + Math.cos(ang) * rad;
-            double z = center.z + Math.sin(ang) * rad;
-            double y = center.y + 6.0 + RNG.nextDouble() * 2.0;
-
-            // black cloud body — dense overlapping puffs for a solid dark mass
-            DustParticleOptions cloudCol = (RNG.nextFloat() < 0.6f) ? STORM_BLACK : STORM_GREY;
-            world.sendParticles(cloudCol,
-                    x, y, z, 2, 0.55, 0.20, 0.55, 0.003);
-
-            // very sparse vanilla cloud mixed in for puffiness
-            if (RNG.nextFloat() < 0.18f) {
-                world.sendParticles(ParticleTypes.CLOUD,
-                        x, y, z, 1, 0.40, 0.15, 0.40, 0.005);
-            }
-
-            // yellow under cloud
-            if (RNG.nextFloat() < 0.45f) {
-                world.sendParticles(BOLT_YELLOW,
-                        x + (RNG.nextDouble() - 0.5) * 1.2,
-                        y - 0.5,
-                        z + (RNG.nextDouble() - 0.5) * 1.2,
-                        1, 0.12, 0.06, 0.12, 0.0);
-            }
-
-            // sparks from clouds
-            if (RNG.nextFloat() < 0.28f) {
-                world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                        x, y - 0.7, z,
-                        1, 0.15, 0.10, 0.15, 0.0);
-            }
         }
     }
 

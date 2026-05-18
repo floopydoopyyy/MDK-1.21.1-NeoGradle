@@ -20,6 +20,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -135,6 +136,7 @@ public class PsychicPower implements PowerInterface {
     private static final float  COMPEL_LOOK_STRENGTH    = 0.25f;
     private static final double COMPEL_LOOK_MIN_DIST    = 2.5;
     private static final double COMPEL_PROJECTILE_SPEED = 1.3;
+    private static final float  COMPEL_BREAK_CHANCE     = 0.4f; // Chance to break control when hit by caster
 
     // Spike (secondary)
     private static final double SPIKE_BEAM_RANGE        = 18.0;
@@ -159,6 +161,11 @@ public class PsychicPower implements PowerInterface {
     private static final float  ULT_LOOK_STRENGTH     = 0.3f;
     private static final double ULT_STOP_DISTANCE     = 1.5;
     private static final int    ATTACK_COOLDOWN        = 35;
+    private static final float  POSSESS_BREAK_CHANCE   = 0.3f; // Chance to break possess when hit by caster
+
+    // Break Rewards
+    private static final float  BREAK_HEAL_REWARD       = 10.0f; // healing for breaking
+    private static final long   BREAK_CDR_REWARD_MS     = 2500;  // cooldown reduction
 
     // Easter egg
     private static final double COMPEL_CHAT_CHANCE = 0.05;
@@ -254,15 +261,15 @@ public class PsychicPower implements PowerInterface {
         if (!PassiveManager.isEnabled(attacker)) return;
 
         PsychicState state = getState(attacker);
-        if (state.leechCd > 0) return;
-
-        // OPTIMIZATION: Direct map lookup instead of scanning command tags on the entity
         UUID tid = target.getUUID();
-        if (!state.compelled.containsKey(tid)
-                && !state.spiked.containsKey(tid)
-                && !state.possessed.containsKey(tid)) return;
-
         ServerLevel world = attacker.serverLevel();
+
+        boolean isCompelled = state.compelled.containsKey(tid);
+        boolean isPossessed = state.possessed.containsKey(tid);
+        boolean isSpiked    = state.spiked.containsKey(tid);
+
+        if (!isCompelled && !isPossessed && !isSpiked) return;
+        if (state.leechCd > 0) return;
 
         attacker.heal(LEECH_HEAL);
         spawnLeechParticles(world, attacker, target);
@@ -273,6 +280,66 @@ public class PsychicPower implements PowerInterface {
 
         state.leechCd = LEECH_INTERNAL_CD;
     }
+
+    /**
+     * GLOBAL DAMAGE HOOK
+     * 1. Cancels damage if a puppet tries to attack its controller.
+     * 2. Runs break-chance logic if the controller hits the puppet.
+     * Returns TRUE to cancel the damage event.
+     */
+    public static boolean onDamageGlobal(LivingEntity victim, DamageSource source) {
+        Entity attackerEnt = source.getEntity();
+        if (attackerEnt == null) return false;
+
+        // prevent controlled from attacking controller
+        if (victim instanceof ServerPlayer player) {
+            PsychicState state = ACTIVE_STATES.get(player.getUUID());
+            if (state != null) {
+                UUID attackerId = attackerEnt.getUUID();
+                if (state.compelled.containsKey(attackerId) || state.possessed.containsKey(attackerId)) {
+                    return true; // Cancel damage entirely
+                }
+            }
+        }
+
+        // break control if controller attacks controlled entity
+        if (attackerEnt instanceof ServerPlayer player) {
+            PsychicState state = ACTIVE_STATES.get(player.getUUID());
+            if (state != null) {
+                UUID victimId = victim.getUUID();
+                boolean isCompelled = state.compelled.containsKey(victimId);
+                boolean isPossessed = state.possessed.containsKey(victimId);
+                boolean brokeControl = false;
+
+                if (isCompelled && player.getRandom().nextFloat() < COMPEL_BREAK_CHANCE) {
+                    state.compelled.remove(victimId);
+                    victim.removeEffect(ModEffects.COMPELLED);
+                    brokeControl = true;
+                }
+
+                if (isPossessed && player.getRandom().nextFloat() < POSSESS_BREAK_CHANCE) {
+                    state.possessed.remove(victimId);
+                    victim.removeEffect(ModEffects.POSSESSED);
+                    victim.removeEffect(MobEffects.DIG_SLOWDOWN);
+                    brokeControl = true;
+                }
+
+                if (brokeControl && player.level() instanceof ServerLevel w) {
+                    // Visual/Audio flair for shattering control
+                    w.playSound(null, victim.blockPosition(), SoundEvents.GLASS_BREAK, SoundSource.PLAYERS, 0.5f, 1.2f);
+                    w.playSound(null, player.blockPosition(), SoundEvents.WARDEN_HEARTBEAT, player.getSoundSource(), 1.0f, 1.8f);
+                    spawnLeechParticles(w, player, victim);
+
+                    // The massive reward
+                    player.heal(BREAK_HEAL_REWARD);
+                    PowerManager.reduceAllCooldowns(player, BREAK_CDR_REWARD_MS);
+                }
+            }
+        }
+
+        return false;
+    }
+
 
     /* ============================================================
        PASSIVE — MIND SAP
@@ -608,7 +675,7 @@ public class PsychicPower implements PowerInterface {
                     MobEffects.DIG_SLOWDOWN, 5, 2, true, false, false));
 
             spawnControlParticles(w, le);
-            handleControlledAttacks(w, le, entry);
+            handleControlledAttacks(w, le, entry, player);
         }
     }
 
@@ -626,21 +693,21 @@ public class PsychicPower implements PowerInterface {
         return (hit.getType() != HitResult.Type.MISS) ? hit.getLocation() : end;
     }
 
-    private static void handleControlledAttacks(ServerLevel world, LivingEntity entity, PossessedEntry entry) {
+    private static void handleControlledAttacks(ServerLevel world, LivingEntity entity, PossessedEntry entry, ServerPlayer owner) {
         if (entity.getAttribute(Attributes.ATTACK_DAMAGE) == null) return;
 
         // OPTIMIZATION: attack cooldown stored in PossessedEntry, replacing ATTACK_CD_TAG on entity
         if (entry.attackCd > 0) {
             entry.attackCd--;
             // Still face nearest target even while on cooldown
-            LivingEntity target = findNearestTarget(world, entity);
+            LivingEntity target = findNearestTarget(world, entity, owner);
             if (target != null && entity.hasLineOfSight(target)) {
                 forceLook(entity, target.getEyePosition().subtract(entity.getEyePosition()).normalize(), ULT_LOOK_STRENGTH);
             }
             return;
         }
 
-        LivingEntity target = findNearestTarget(world, entity);
+        LivingEntity target = findNearestTarget(world, entity, owner);
         if (target == null || !entity.hasLineOfSight(target)) return;
 
         forceLook(entity, target.getEyePosition().subtract(entity.getEyePosition()).normalize(), ULT_LOOK_STRENGTH);
@@ -654,14 +721,14 @@ public class PsychicPower implements PowerInterface {
         }
     }
 
-    private static LivingEntity findNearestTarget(ServerLevel world, LivingEntity attacker) {
+    private static LivingEntity findNearestTarget(ServerLevel world, LivingEntity attacker, ServerPlayer owner) {
         LivingEntity closest      = null;
         double       closestDistSq = 3.0 * 3.0;
 
         for (LivingEntity e : world.getEntitiesOfClass(
                 LivingEntity.class,
                 attacker.getBoundingBox().inflate(3.0),
-                en -> en.isAlive() && en != attacker && attacker.hasLineOfSight(en))) {
+                en -> en.isAlive() && en != attacker && en != owner && attacker.hasLineOfSight(en))) {
 
             double dist = attacker.distanceToSqr(e);
             if (dist < closestDistSq) {
@@ -679,7 +746,7 @@ public class PsychicPower implements PowerInterface {
     }
 
     /* ============================================================
-       MOVEMENT AND LOOK  (NEOFORGE LOGIC)
+       MOVEMENT AND LOOK
        ============================================================ */
 
     private static void applyMovement(LivingEntity entity, Vec3 dir, double distance,
@@ -687,20 +754,26 @@ public class PsychicPower implements PowerInterface {
                                       double stopDistance) {
         Vec3 velocity = entity.getDeltaMovement();
 
+        double nextY = velocity.y;
+        // try make them jump if they need to
+        if (entity.horizontalCollision && entity.onGround()) {
+            nextY = 0.5;
+        }
+
         if (entity instanceof Mob mob) {
             mob.getNavigation().stop();
 
             if (distance > stopDistance) {
                 Vec3 flatDir = new Vec3(dir.x, 0, dir.z);
                 if (flatDir.lengthSqr() > 0.0001) flatDir = flatDir.normalize();
-                entity.setDeltaMovement(flatDir.x * mobSpeed, velocity.y, flatDir.z * mobSpeed);
+                entity.setDeltaMovement(flatDir.x * mobSpeed, nextY, flatDir.z * mobSpeed);
                 entity.hasImpulse = true;
 
                 if (entity.level() instanceof ServerLevel sw) {
                     sw.getChunkSource().broadcastAndSend(entity, new ClientboundTeleportEntityPacket(entity));
                 }
             } else {
-                entity.setDeltaMovement(velocity.x * 0.4, velocity.y, velocity.z * 0.4);
+                entity.setDeltaMovement(velocity.x * 0.4, nextY, velocity.z * 0.4);
                 entity.hasImpulse = true;
             }
 
@@ -713,12 +786,12 @@ public class PsychicPower implements PowerInterface {
                 if (newVel.horizontalDistance() > playerMaxSpeed) {
                     newVel = new Vec3(newVel.x, 0, newVel.z)
                             .normalize().scale(playerMaxSpeed)
-                            .add(0, velocity.y, 0);
+                            .add(0, nextY, 0);
                 }
-                entity.setDeltaMovement(newVel.x, velocity.y, newVel.z);
+                entity.setDeltaMovement(newVel.x, nextY, newVel.z);
                 entity.hasImpulse = true;
             } else {
-                entity.setDeltaMovement(velocity.x * 0.4, velocity.y, velocity.z * 0.4);
+                entity.setDeltaMovement(velocity.x * 0.4, nextY, velocity.z * 0.4);
                 entity.hasImpulse = true;
             }
         }
@@ -811,6 +884,38 @@ public class PsychicPower implements PowerInterface {
         double t = Mth.clamp(
                 point.subtract(lineStart).dot(line) / (len * len), 0, 1);
         return point.distanceTo(lineStart.add(line.scale(t)));
+    }
+
+    // OTHER HELPERS
+
+    public static boolean cleansePsychic(LivingEntity target) {
+        boolean cleansed = false;
+        UUID targetId = target.getUUID();
+
+        for (PsychicState state : ACTIVE_STATES.values()) {
+            // Cleanse Primary
+            if (state.compelled.remove(targetId) != null) {
+                target.removeEffect(ModEffects.COMPELLED);
+                cleansed = true;
+            }
+
+            // Cleanse Secondary
+            if (state.spiked.remove(targetId) != null) {
+                target.removeEffect(ModEffects.STUN);
+                target.removeEffect(MobEffects.MOVEMENT_SLOWDOWN);
+                target.removeEffect(MobEffects.DIG_SLOWDOWN);
+                cleansed = true;
+            }
+
+            // Cleanse Ultimate
+            if (state.possessed.remove(targetId) != null) {
+                target.removeEffect(ModEffects.POSSESSED);
+                target.removeEffect(MobEffects.DIG_SLOWDOWN);
+                cleansed = true;
+            }
+        }
+
+        return cleansed;
     }
 
     /* ============================================================

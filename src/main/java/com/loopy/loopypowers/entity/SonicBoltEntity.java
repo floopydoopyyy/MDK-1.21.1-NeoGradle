@@ -89,9 +89,6 @@ public class SonicBoltEntity extends Entity {
                         this.getX(), this.getY() + 0.05, this.getZ(), 1, 0, 0, 0, 0);
             }
 
-            sw.sendParticles(ParticleTypes.SONIC_BOOM,
-                    this.getX(), this.getY() + 0.05, this.getZ(), 6, 0, 0, 0, 0);
-
             sw.sendParticles(ParticleTypes.SCULK_CHARGE_POP,
                     this.getX(), this.getY() + 0.05, this.getZ(), 4, 0.02, 0.02, 0.02, 0.0);
         }

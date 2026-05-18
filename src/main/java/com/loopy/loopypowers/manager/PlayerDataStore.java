@@ -30,7 +30,13 @@ public class PlayerDataStore {
         return getPlayerDir(server).resolve(uuid + ".dat");
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    private static Path getGlobalFile(MinecraftServer server) {
+        return server.getServerDirectory()
+                .resolve("loopypowers")
+                .resolve("global.dat");
+    }
+
+    // ── Public API (Per-Player) ───────────────────────────────────────────────
 
     /**
      * Serialises the player's power, level, and cooldowns to disc.
@@ -93,6 +99,34 @@ public class PlayerDataStore {
                     "[Loopypowers] Failed to delete player data for {}: {}",
                     player.getUUID(), e.getMessage()
             );
+        }
+    }
+
+    // ── Public API (Global) ───────────────────────────────────────────────────
+
+    public static void saveGlobal(MinecraftServer server) {
+        if (server == null) return;
+        Path file = getGlobalFile(server);
+        try {
+            Files.createDirectories(file.getParent());
+            CompoundTag nbt = PowerManager.saveGlobalState();
+            NbtIo.writeCompressed(nbt, file);
+        } catch (IOException e) {
+            Loopypowers.LOGGER.error("[Loopypowers] Failed to save global data: {}", e.getMessage());
+        }
+    }
+
+    public static void loadGlobal(MinecraftServer server) {
+        if (server == null) return;
+        Path file = getGlobalFile(server);
+        if (!Files.exists(file)) return;
+        try {
+            CompoundTag nbt = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
+            if (nbt != null) {
+                PowerManager.loadGlobalState(nbt);
+            }
+        } catch (IOException e) {
+            Loopypowers.LOGGER.error("[Loopypowers] Failed to load global data: {}", e.getMessage());
         }
     }
 }

@@ -33,12 +33,13 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3f;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 
+import net.neoforged.neoforge.network.PacketDistributor;
+import com.loopy.loopypowers.network.payload.NatureCageFxPayload;
+import com.loopy.loopypowers.network.payload.NatureGasFxPayload;
+import com.loopy.loopypowers.network.payload.NatureTetherFxPayload;
+
 import java.util.*;
 
-/**
- * Nature power skeleton (1.20.1 / Fabric -> 1.21.1)
- * Focus: area denial + trapping + "hunt" marking.
- */
 public class NaturePower implements PowerInterface {
 
     /* ============================================================
@@ -215,10 +216,6 @@ public class NaturePower implements PowerInterface {
     // stinky
     private static final float STINK_CHANCE = 0.02f;
 
-    // make green dust
-    private static final DustParticleOptions GAS_DUST =
-            new DustParticleOptions(new Vector3f(0.12f, 0.95f, 0.18f), 1.75f);
-
     private static final class GasInstance {
         final ResourceKey<Level> worldKey;
         final Vec3 center;
@@ -260,8 +257,6 @@ public class NaturePower implements PowerInterface {
     private static void tickExpandingGas(ServerPlayer player, NatureState state) {
         if (state.gases.isEmpty()) return;
 
-        long now = player.serverLevel().getGameTime();
-
         Iterator<GasInstance> it = state.gases.iterator();
         while (it.hasNext()) {
             GasInstance g = it.next();
@@ -288,39 +283,14 @@ public class NaturePower implements PowerInterface {
             double minY = center.y - halfH;
             double maxY = center.y + halfH;
 
-            // VISUALS
+            // VISUALS - Delegated to client via payload to prevent server lag
             int count = Mth.floor(Mth.lerp(t, GAS_PARTICLES_MIN, GAS_PARTICLES_MAX));
-
-            // thick core
-            w.sendParticles(
-                    GAS_DUST,
+            PacketDistributor.sendToPlayersNear(
+                    w, null,
                     center.x, center.y, center.z,
-                    count,
-                    r * 0.90, halfH * 0.90, r * 0.90,
-                    0.02
+                    64.0D,
+                    new NatureGasFxPayload(center, r, (float)halfH, count, g.seed)
             );
-
-            // boundary wisps (readable edge)
-            if (((now + g.seed) & 1L) == 0L) {
-                w.sendParticles(
-                        GAS_DUST,
-                        center.x, center.y, center.z,
-                        Math.max(20, count / 3),
-                        r * 1.10, halfH * 0.55, r * 1.10,
-                        0.03
-                );
-            }
-
-            // occasional particles
-            if (((now + g.seed) % 10L) == 0L) {
-                w.sendParticles(
-                        GAS_DUST,
-                        center.x, center.y, center.z,
-                        120,
-                        r * 0.70, halfH * 0.70, r * 0.70,
-                        0.04
-                );
-            }
 
             // POISON
             if (((g.age + g.seed) % GAS_APPLY_INTERVAL_TICKS) != 0) continue;
@@ -376,6 +346,7 @@ public class NaturePower implements PowerInterface {
        ============================================================ */
 
     private static final int CAGE_LIFETIME_TICKS = 240; // time up
+    private static final int CAGE_BUILD_INTERVAL_TICKS = 2; // build 1 layer every 2 ticks
 
     private static final int CAGE_RADIUS = 12;
     private static final int CAGE_POINTS = 68; // ring density
@@ -385,10 +356,16 @@ public class NaturePower implements PowerInterface {
     private static final class CageState {
         int ticksLeft = CAGE_LIFETIME_TICKS;
         ResourceKey<Level> worldKey;
+        final List<BlockPos> bases;
         final List<BlockPos> placed = new ArrayList<>();
 
-        CageState(ResourceKey<Level> worldKey) {
+        int buildLayer = 0;
+        int buildWait = 0;
+        boolean built = false;
+
+        CageState(ResourceKey<Level> worldKey, List<BlockPos> bases) {
             this.worldKey = worldKey;
+            this.bases = bases;
         }
     }
 
@@ -401,13 +378,12 @@ public class NaturePower implements PowerInterface {
 
         removeCageNow(player, state);
 
-        state.cage = new CageState(w.dimension());
-
         int cx = player.blockPosition().getX();
         int cz = player.blockPosition().getZ();
         int aroundY = player.blockPosition().getY();
 
-        // build a ring on the ground
+        // Calculate all ground bases instantly
+        List<BlockPos> bases = new ArrayList<>();
         for (int i = 0; i < CAGE_POINTS; i++) {
             double a = (Math.PI * 2.0) * (i / (double) CAGE_POINTS);
 
@@ -417,24 +393,21 @@ public class NaturePower implements PowerInterface {
                 int x = cx + (int) Math.round(Math.cos(a) * rNow);
                 int z = cz + (int) Math.round(Math.sin(a) * rNow);
 
-                // find ground
                 int baseAirY = findLocalFloorAirY(w, x, z, aroundY);
-
-                // Build column
-                for (int y = 0; y < CAGE_HEIGHT; y++) {
-                    BlockPos pos = new BlockPos(x, baseAirY + y, z);
-
-                    // only replace air
-                    BlockState existing = w.getBlockState(pos);
-                    if (!existing.getFluidState().isEmpty()) continue;
-                    if (!existing.getCollisionShape(w, pos).isEmpty() && !existing.isAir()) continue;
-
-                    BlockState vine = ModBlocks.THORN_VINE.get().defaultBlockState();
-                    w.setBlock(pos, vine, 3);
-                    state.cage.placed.add(pos);
-                }
+                bases.add(new BlockPos(x, baseAirY, z));
             }
         }
+
+        state.cage = new CageState(w.dimension(), bases);
+
+        // payload
+        PacketDistributor.sendToPlayersNear(
+                w, null,
+                cx, aroundY, cz,
+                64.0D,
+                new NatureCageFxPayload(cx, aroundY, cz, CAGE_RADIUS, CAGE_THICKNESS)
+        );
+
         player.swing(InteractionHand.MAIN_HAND, true);
     }
 
@@ -467,6 +440,37 @@ public class NaturePower implements PowerInterface {
     private static void tickCage(ServerPlayer player, NatureState state) {
         if (state.cage == null) return;
 
+        ServerLevel w = Objects.requireNonNull(player.getServer()).getLevel(state.cage.worldKey);
+        if (w == null) return;
+
+        if (!state.cage.built) {
+            state.cage.buildWait--;
+            if (state.cage.buildWait <= 0) {
+                int yOffset = state.cage.buildLayer;
+                BlockState vine = ModBlocks.THORN_VINE.get().defaultBlockState();
+
+                for (BlockPos base : state.cage.bases) {
+                    BlockPos pos = base.above(yOffset);
+
+                    BlockState existing = w.getBlockState(pos);
+                    if (!existing.getFluidState().isEmpty()) continue;
+                    if (!existing.getCollisionShape(w, pos).isEmpty() && !existing.isAir()) continue;
+
+                    // client stuff
+                    w.setBlock(pos, vine, 2);
+                    state.cage.placed.add(pos);
+                }
+
+                state.cage.buildLayer++;
+                state.cage.buildWait = CAGE_BUILD_INTERVAL_TICKS;
+
+                if (state.cage.buildLayer >= CAGE_HEIGHT) {
+                    state.cage.built = true;
+                }
+            }
+            return; // Pause lifetime decay while building
+        }
+
         state.cage.ticksLeft--;
         if (state.cage.ticksLeft > 0) return;
 
@@ -478,11 +482,16 @@ public class NaturePower implements PowerInterface {
 
         ServerLevel w = Objects.requireNonNull(player.getServer()).getLevel(state.cage.worldKey);
         if (w != null) {
-            for (BlockPos pos : state.cage.placed) {
+            // thought this would break it silently
+            // it didnt.
+            for (int i = state.cage.placed.size() - 1; i >= 0; i--) {
+                BlockPos pos = state.cage.placed.get(i);
                 if (w.getBlockState(pos).is(ModBlocks.THORN_VINE.get())) {
-                    w.destroyBlock(pos, false);
+                    w.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
                 }
             }
+            // Play a single unified crumpling sound instead of 400 block breaks
+            w.playSound(null, player.blockPosition(), SoundEvents.CROP_BREAK, SoundSource.BLOCKS, 1.0f, 0.7f);
         }
         state.cage = null;
     }
@@ -799,44 +808,12 @@ public class NaturePower implements PowerInterface {
     }
 
     private static void spawnVineTether(ServerLevel w, Vec3 from, Vec3 to, int seed) {
-        Vec3 delta = to.subtract(from);
-        double len = delta.length();
-        if (len < 0.001) return;
-
-        int steps = Mth.clamp((int)(len * 10), 10, 60);
-        Vec3 step = delta.scale(1.0 / steps);
-
-        Vec3 p = from;
-        for (int i = 0; i <= steps; i++) {
-            DustParticleOptions eff = ((w.getGameTime() + seed + i) % 9L == 0L) ? VINE_PINK_DUST : VINE_DUST;
-
-            w.sendParticles(
-                    eff,
-                    p.x, p.y, p.z,
-                    1,
-                    0.02, 0.02, 0.02,
-                    0.0
-            );
-            p = p.add(step);
-        }
-
-        // “anchor” puff
-        if ((w.getGameTime() & 3L) == 0L) {
-            w.sendParticles(
-                    VINE_DUST,
-                    from.x, from.y + 0.15, from.z,
-                    8,
-                    0.20, 0.10, 0.20,
-                    0.01
-            );
-            w.sendParticles(
-                    VINE_PINK_DUST,
-                    from.x, from.y + 0.15, from.z,
-                    2,
-                    0.20, 0.10, 0.20,
-                    0.01
-            );
-        }
+        PacketDistributor.sendToPlayersNear(
+                w, null,
+                from.x, from.y, from.z,
+                64.0D,
+                new NatureTetherFxPayload(from, to, seed)
+        );
     }
 
     private static void spawnVineStrike(ServerLevel w, Vec3 from, Vec3 to, int seed) {

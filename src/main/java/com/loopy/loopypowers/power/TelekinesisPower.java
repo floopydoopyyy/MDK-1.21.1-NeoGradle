@@ -3,14 +3,18 @@ package com.loopy.loopypowers.power;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
 import com.loopy.loopypowers.sound.ModSounds;
+import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -18,10 +22,13 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.item.FallingBlockEntity;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.core.BlockPos;
 import org.joml.Vector3f;
 
@@ -33,6 +40,9 @@ import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.Queue;
+import java.util.LinkedList;
+import java.util.Collections;
 
 public class TelekinesisPower implements PowerInterface {
 
@@ -45,7 +55,9 @@ public class TelekinesisPower implements PowerInterface {
 
     private static class DebrisField {
         final Map<UUID, Double> orbitAngles = new HashMap<>();
+        final Queue<BlockPos> harvestQueue = new LinkedList<>();
         int ticksRemaining = 0;
+        boolean wooliamSpawned = false;
     }
 
     private static class TKCasterState {
@@ -67,6 +79,9 @@ public class TelekinesisPower implements PowerInterface {
         int airborneTicks = 0;
         UUID impactOwner = null;
         Vec3 prevVelocity = null;
+
+        int yankTicks = 0;
+        UUID yankOwner = null;
     }
 
     private static TKCasterState getCasterState(Entity player) {
@@ -82,10 +97,12 @@ public class TelekinesisPower implements PowerInterface {
     private static final double PASSIVE_KB_VERTICAL = 0.2;
 
     // ── Primary — Yank ──────────────────────────────────────────
-    private static final double YANK_RANGE          = 12.0;
-    private static final double YANK_CONE_DOT       = 0.6;
-    private static final double YANK_STRENGTH       = 0.9;
-    private static final double YANK_VERTICAL       = 0.3;
+    private static final double YANK_RANGE             = 12.0;
+    private static final double YANK_CONE_DOT          = 0.6;
+    private static final double YANK_STRENGTH          = 0.9;
+    private static final double YANK_VERTICAL          = 0.3;
+    private static final float  YANK_EXTRA_FALL_DAMAGE = 6.0f; // extra damage on fall
+    private static final int    YANK_FALL_WINDOW_TICKS = 60;   // 3 seconds window to hit the ground
 
     // ── Secondary Suspend / throw phase ─────────────────────────────
     private static final int    SUSPEND_TICKS         = 50;
@@ -121,27 +138,26 @@ public class TelekinesisPower implements PowerInterface {
     private static final float  IMPACT_FLOOR_SCALE  = 1.8f;
 
     // ── Ultimate ──────────────────────────────────
-    private static final int    DEBRIS_MAX_BLOCKS            = 10;
-    private static final double DEBRIS_HARVEST_RADIUS        = 10.0;
+
+    private static final int    DEBRIS_MAX_BLOCKS            = 8;
+    private static final double DEBRIS_HARVEST_RADIUS        = 5.0;
     private static final int    DEBRIS_ORBIT_TICKS           = 260;
-    private static final double DEBRIS_ORBIT_RADIUS          = 4.5;
+    private static final double DEBRIS_ORBIT_RADIUS          = 6.5;
     private static final double DEBRIS_ORBIT_RADIUS_INNER    = 2.5;
-    private static final double DEBRIS_ORBIT_SPEED           = 0.045;
-    private static final double DEBRIS_ORBIT_SPEED_INNER     = 0.08;
+    private static final double DEBRIS_ORBIT_SPEED           = 0.035;
+    private static final double DEBRIS_ORBIT_SPEED_INNER     = 0.20;
     private static final double DEBRIS_PULL_RADIUS           = 12.0;
     private static final double DEBRIS_PULL_STRENGTH         = 0.07;
-    private static final float  DEBRIS_PULL_DAMAGE           = 0.1f;
-    private static final int    DEBRIS_THROW_COOLDOWN        = 8;
-    private static final int    DEBRIS_THROW_COUNT           = 5;
+    private static final float  DEBRIS_PULL_DAMAGE           = 0.5f;
     private static final float  DEBRIS_THROW_DAMAGE          = 13.0f;
     private static final double DEBRIS_THROW_SPEED           = 2.4;
-    private static final double DEBRIS_THROW_SPREAD          = 0.3;
     private static final double DEBRIS_THROW_EXPLOSION_RADIUS = 4.0;
+    private static final double DEBRIS_INTERCEPT_RADIUS      = 5.0; // Radius for projectile interception
 
     // block regen
     private static final int    DEBRIS_REGEN_DELAY_TICKS = 15;
-    private static final int    DEBRIS_REGEN_INTERVAL    = 20;
-    private static final int    DEBRIS_REGEN_AMOUNT      = 5;
+    private static final int    DEBRIS_REGEN_INTERVAL    = 10;
+    private static final int    DEBRIS_REGEN_AMOUNT      = 4;
 
     // EGG
     private static final int    WOOLLIAM_CHANCE            = 70;
@@ -269,6 +285,28 @@ public class TelekinesisPower implements PowerInterface {
        ESSENTIAL
        ============================================================ */
 
+    /**
+     * GLOBAL DAMAGE HOOK
+     * Called from Loopypowers.java to intercept damage events.
+     */
+    public static float onDamageGlobal(LivingEntity victim, DamageSource source, float amount) {
+        if (source.is(DamageTypeTags.IS_FALL)) {
+            TKVictimState vState = ACTIVE_VICTIMS.get(victim.getUUID());
+            if (vState != null && vState.yankTicks > 0) {
+                vState.yankTicks = 0; // Consume the mark
+                vState.yankOwner = null;
+
+                if (victim.level() instanceof ServerLevel w) {
+                    w.sendParticles(TK_MAGENTA, victim.getX(), victim.getY() + 0.5, victim.getZ(), 15, 0.4, 0.2, 0.4, 0.05);
+                    w.playSound(null, victim.blockPosition(), SoundEvents.BONE_BLOCK_BREAK, victim.getSoundSource(), 1.0f, 0.8f);
+                }
+
+                return amount + YANK_EXTRA_FALL_DAMAGE;
+            }
+        }
+        return amount;
+    }
+
     @Override
     public void onAssign(ServerPlayer player) {
         player.getTags().removeIf(tag -> tag.startsWith("tk_"));
@@ -282,24 +320,28 @@ public class TelekinesisPower implements PowerInterface {
         UUID pid = player.getUUID();
         TKCasterState caster = ACTIVE_CASTERS.remove(pid);
 
-        if (caster == null) return;
-
-        if (player.getServer() != null) {
+        if (caster != null && player.getServer() != null) {
             for (ServerLevel w : player.getServer().getAllLevels()) {
                 if (caster.debrisField != null) {
                     for (UUID uuid : caster.debrisField.orbitAngles.keySet()) {
                         Entity e = w.getEntity(uuid);
                         if (e != null) e.discard();
                     }
-                    caster.debrisField = null;
                 }
 
                 for (UUID uuid : caster.thrownBlocks.keySet()) {
                     Entity e = w.getEntity(uuid);
                     if (e != null) e.discard();
                 }
-                caster.thrownBlocks.clear();
+
+                // Fallback sweep to catch any unloaded chunks' debris that might reload later
+                w.getEntitiesOfClass(Entity.class, player.getBoundingBox().inflate(150),
+                                e -> e.getTags().contains("tk_debris") && e.getTags().contains(player.getStringUUID()))
+                        .forEach(Entity::discard);
             }
+            // Moved OUTSIDE the loop so it correctly handles all dimensions
+            caster.debrisField = null;
+            caster.thrownBlocks.clear();
         }
 
         Iterator<Map.Entry<UUID, TKVictimState>> it = ACTIVE_VICTIMS.entrySet().iterator();
@@ -315,7 +357,11 @@ public class TelekinesisPower implements PowerInterface {
                 vState.airborneTicks = 0;
                 vState.prevVelocity = null;
             }
-            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0) {
+            if (pid.equals(vState.yankOwner)) {
+                vState.yankOwner = null;
+                vState.yankTicks = 0;
+            }
+            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0 && vState.yankTicks <= 0) {
                 it.remove();
             }
         }
@@ -341,6 +387,10 @@ public class TelekinesisPower implements PowerInterface {
                 performThrow(player, caster);
                 caster.throwCd = 8;
             }
+        }
+
+        // Allow fully spamming the ultimate by continually checking the swinging state
+        if (isSwinging) {
             throwDebrisProjectile(player, caster);
         }
 
@@ -356,19 +406,27 @@ public class TelekinesisPower implements PowerInterface {
 
             boolean ownsSuspend = player.getUUID().equals(vState.suspendOwner);
             boolean ownsImpact = player.getUUID().equals(vState.impactOwner);
+            boolean ownsYank = player.getUUID().equals(vState.yankOwner);
 
-            if (!ownsSuspend && !ownsImpact) continue;
+            if (!ownsSuspend && !ownsImpact && !ownsYank) continue;
 
             Entity ent = world.getEntity(entry.getKey());
             if (!(ent instanceof LivingEntity le) || !le.isAlive()) {
                 if (ownsSuspend) { vState.suspendTicks = 0; vState.chokeTicks = 0; vState.suspendOwner = null; }
                 if (ownsImpact) { vState.airborneTicks = 0; vState.impactOwner = null; vState.prevVelocity = null; }
+                if (ownsYank) { vState.yankTicks = 0; vState.yankOwner = null; }
             } else {
                 if (ownsSuspend) handleSuspendAndChoke(le, world, vState);
                 if (ownsImpact) handleImpactDamage(le, world, vState);
+                if (ownsYank) {
+                    if (vState.yankTicks > 0) {
+                        vState.yankTicks--;
+                        if (vState.yankTicks <= 0) vState.yankOwner = null;
+                    }
+                }
             }
 
-            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0) {
+            if (vState.suspendTicks <= 0 && vState.chokeTicks <= 0 && vState.airborneTicks <= 0 && vState.yankTicks <= 0) {
                 it.remove();
             }
         }
@@ -478,6 +536,12 @@ public class TelekinesisPower implements PowerInterface {
             e.hasImpulse = true;
 
             markForImpactTracking(e, launchVel, player.getUUID());
+
+            // Track for extra fall damage upon landing
+            TKVictimState vState = ACTIVE_VICTIMS.computeIfAbsent(e.getUUID(), k -> new TKVictimState());
+            vState.yankTicks = YANK_FALL_WINDOW_TICKS;
+            vState.yankOwner = player.getUUID();
+
             spawnImpactRing(world, e.position(), 8, 0.25);
             hitAnything = true;
         }
@@ -632,11 +696,16 @@ public class TelekinesisPower implements PowerInterface {
             }
         }
 
+        // Safety Sweep: Delete any lingering orphaned debris from prior bugged sessions
+        world.getEntitiesOfClass(Entity.class, player.getBoundingBox().inflate(150),
+                        e -> e.getTags().contains("tk_debris") && e.getTags().contains(player.getStringUUID()))
+                .forEach(Entity::discard);
+
         DebrisField field = new DebrisField();
         field.ticksRemaining = DEBRIS_ORBIT_TICKS;
         caster.debrisField = field;
 
-        int harvested = tryHarvestBlocks(player, world, field);
+        queueHarvestBlocks(player, world, field);
 
         for (int ring = 0; ring < 3; ring++) {
             double ringRadius = 1.5 + ring * 2.5;
@@ -663,17 +732,9 @@ public class TelekinesisPower implements PowerInterface {
 
         world.playSound(null, player.blockPosition(),
                 SoundEvents.WARDEN_SONIC_BOOM, player.getSoundSource(), 1.2f, 0.4f);
-
-        if (harvested > 0) {
-            world.playSound(null, player.blockPosition(),
-                    SoundEvents.STONE_BREAK, player.getSoundSource(), 1.5f, 0.6f);
-        }
-
-        world.playSound(null, player.blockPosition(),
-                SoundEvents.GENERIC_EXPLODE.value(), player.getSoundSource(), 0.6f, 0.5f);
     }
 
-    private int tryHarvestBlocks(ServerPlayer player, ServerLevel world, DebrisField field) {
+    private void queueHarvestBlocks(ServerPlayer player, ServerLevel world, DebrisField field) {
         Vec3 center = player.position();
         int radius = (int) Math.ceil(DEBRIS_HARVEST_RADIUS);
         List<BlockPos> candidates = new ArrayList<>();
@@ -689,46 +750,59 @@ public class TelekinesisPower implements PowerInterface {
             }
         }
 
-        java.util.Collections.shuffle(candidates, new java.util.Random());
+        Collections.shuffle(candidates);
 
-        int harvested = 0;
-        boolean wooliamSpawned = false;
-
+        int count = 0;
         for (BlockPos pos : candidates) {
-            if (harvested >= DEBRIS_MAX_BLOCKS) break;
+            if (count >= DEBRIS_MAX_BLOCKS) break;
+            field.harvestQueue.add(pos);
+            count++;
+        }
+    }
 
-            BlockState state = world.getBlockState(pos);
-            world.removeBlock(pos, false);
+    private void harvestSingleBlock(ServerPlayer player, ServerLevel world, DebrisField field, BlockPos pos) {
+        while (!isHarvestable(world, pos) && !field.harvestQueue.isEmpty()) {
+            pos = field.harvestQueue.poll();
+        }
+        if (!isHarvestable(world, pos)) return;
 
-            Entity orbitEntity;
+        BlockState state = world.getBlockState(pos);
 
-            // --- EASTER EGG ---
-            if (!wooliamSpawned && world.random.nextInt(WOOLLIAM_CHANCE) == 0) {
-                Sheep sheep = EntityType.SHEEP.create(world);
-                if (sheep != null) {
-                    sheep.setCustomName(Component.literal("Woolliam"));
-                    sheep.setNoGravity(true);
-                    sheep.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 0, 0);
-                    world.addFreshEntity(sheep);
-                    orbitEntity = sheep;
-                    wooliamSpawned = true;
-                } else {
-                    orbitEntity = FallingBlockEntity.fall(world, pos, state);
-                }
+        Entity orbitEntity;
+
+        // --- EASTER EGG ---
+        if (!field.wooliamSpawned && world.random.nextInt(WOOLLIAM_CHANCE) == 0) {
+            Sheep sheep = EntityType.SHEEP.create(world);
+            if (sheep != null) {
+                sheep.setCustomName(Component.literal("Woolliam"));
+                sheep.setNoGravity(true);
+                sheep.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 0, 0);
+                world.removeBlock(pos, false);
+                world.addFreshEntity(sheep);
+                orbitEntity = sheep;
+                field.wooliamSpawned = true;
             } else {
+                world.removeBlock(pos, false);
                 orbitEntity = FallingBlockEntity.fall(world, pos, state);
             }
-
-            if (orbitEntity instanceof FallingBlockEntity falling) {
-                falling.setNoGravity(true);
-                falling.dropItem = false;
-                falling.time = -32768; // Mojmap mapping for timeFalling
-            }
-
-            field.orbitAngles.put(orbitEntity.getUUID(), (Math.PI * 2.0 * harvested) / DEBRIS_MAX_BLOCKS);
-            harvested++;
+        } else {
+            world.removeBlock(pos, false);
+            orbitEntity = FallingBlockEntity.fall(world, pos, state);
         }
-        return harvested;
+
+        if (orbitEntity instanceof FallingBlockEntity falling) {
+            falling.setNoGravity(true);
+            falling.dropItem = false;
+            falling.time = -32768; // Mojmap mapping for timeFalling
+        }
+
+        orbitEntity.addTag("tk_debris");
+        orbitEntity.addTag(player.getStringUUID());
+
+        field.orbitAngles.put(orbitEntity.getUUID(), world.random.nextDouble() * Math.PI * 2.0);
+
+        world.playSound(null, pos, SoundEvents.STONE_BREAK, SoundSource.PLAYERS, 1.5f, 0.6f);
+        world.sendParticles(TK_MAGENTA, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.3, 0.3, 0.3, 0.05);
     }
 
     private boolean isHarvestable(ServerLevel world, BlockPos pos) {
@@ -736,19 +810,33 @@ public class TelekinesisPower implements PowerInterface {
         if (state.isAir() || world.getBlockEntity(pos) != null) return false;
         if (!state.canOcclude()) return false;
 
+        float hardness = state.getDestroySpeed(world, pos);
+        if (hardness < 0 || hardness > 4.0f) return false;
+
         return state.is(BlockTags.LOGS)
                 || state.is(BlockTags.DIRT)
                 || state.is(BlockTags.SAND)
                 || state.is(BlockTags.SNOW)
-                || state.is(BlockTags.MINEABLE_WITH_PICKAXE);
+                || state.is(BlockTags.MINEABLE_WITH_PICKAXE)
+                || state.is(BlockTags.MINEABLE_WITH_SHOVEL)
+                || state.is(BlockTags.MINEABLE_WITH_AXE)
+                || state.is(BlockTags.MINEABLE_WITH_HOE)
+                || state.is(BlockTags.LEAVES);
     }
 
     private void handleDebrisField(ServerPlayer player, TKCasterState caster) {
         DebrisField field = caster.debrisField;
         if (field == null || field.ticksRemaining <= 0) return;
 
-        handleDebrisRegen(player, caster, field);
         ServerLevel world = player.serverLevel();
+
+        // Sequential Ripping
+        if (!field.harvestQueue.isEmpty()) {
+            BlockPos pos = field.harvestQueue.poll();
+            harvestSingleBlock(player, world, field, pos);
+        }
+
+        handleDebrisRegen(player, caster, field);
         field.ticksRemaining--;
 
         if (field.ticksRemaining <= 0) {
@@ -827,6 +915,21 @@ public class TelekinesisPower implements PowerInterface {
             }
         }
 
+        // Projectile Interception
+        interceptProjectiles(player, world, field);
+
+        // Small debris field visuals
+        if (world.getGameTime() % 2 == 0) {
+            for (int i = 0; i < 3; i++) {
+                double angle = world.random.nextDouble() * Math.PI * 2;
+                double r = DEBRIS_ORBIT_RADIUS_INNER + world.random.nextDouble() * 2.0;
+                double y = player.getY() + world.random.nextDouble() * 2.5;
+                world.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, Blocks.STONE.defaultBlockState()),
+                        player.getX() + Math.cos(angle) * r, y, player.getZ() + Math.sin(angle) * r,
+                        1, 0.1, 0.1, 0.1, 0.05);
+            }
+        }
+
         long time = world.getGameTime();
         for (int ring = 0; ring < 3; ring++) {
             double ringR = DEBRIS_ORBIT_RADIUS_INNER + ring * 0.8;
@@ -845,58 +948,83 @@ public class TelekinesisPower implements PowerInterface {
         }
     }
 
+    private void interceptProjectiles(ServerPlayer player, ServerLevel world, DebrisField field) {
+        List<Projectile> projectiles = world.getEntitiesOfClass(
+                Projectile.class,
+                player.getBoundingBox().inflate(DEBRIS_INTERCEPT_RADIUS),
+                p -> p.getOwner() != player && p.isAlive()
+        );
+
+        for (Projectile p : projectiles) {
+            if (field.orbitAngles.isEmpty()) break; // Need debris to intercept
+
+            // Pop a block to intercept
+            UUID sacrificeId = field.orbitAngles.keySet().iterator().next();
+            field.orbitAngles.remove(sacrificeId);
+            Entity sacrifice = world.getEntity(sacrificeId);
+
+            if (sacrifice != null) {
+                spawnSlamImpact(world, sacrifice.position());
+                sacrifice.discard();
+            } else {
+                spawnSlamImpact(world, p.position());
+            }
+
+            p.discard();
+            world.playSound(null, p.blockPosition(), SoundEvents.SHIELD_BLOCK, SoundSource.PLAYERS, 1.0f, 0.8f);
+            world.playSound(null, p.blockPosition(), SoundEvents.GENERIC_EXPLODE.value(), SoundSource.PLAYERS, 0.5f, 1.2f);
+        }
+    }
+
     private void throwDebrisProjectile(ServerPlayer player, TKCasterState caster) {
         DebrisField field = caster.debrisField;
-        if (field == null) return;
-        if (caster.debrisThrowCd > 0) return;
+        if (field == null || field.orbitAngles.isEmpty()) return;
+        if (caster.debrisThrowCd > 0) return; // Rate limiter for spam
 
         ServerLevel world = player.serverLevel();
-        if (field.orbitAngles.size() < DEBRIS_THROW_COUNT) {
-            world.playSound(null, player.blockPosition(), SoundEvents.STONE_HIT, player.getSoundSource(), 0.6f, 0.5f);
-            return;
-        }
 
-        Vec3 look = player.getViewVector(1.0f);
-        Vec3 right = new Vec3(-look.z, 0, look.x).normalize();
-        Vec3 up = look.cross(right).normalize();
-
-        int thrown = 0;
+        // Pop exactly one
         Iterator<Map.Entry<UUID, Double>> it = field.orbitAngles.entrySet().iterator();
+        if (!it.hasNext()) return;
 
-        while (it.hasNext() && thrown < DEBRIS_THROW_COUNT) {
-            Map.Entry<UUID, Double> entry = it.next();
-            UUID uuid = entry.getKey();
+        Map.Entry<UUID, Double> entry = it.next();
+        UUID uuid = entry.getKey();
+        Entity orbitEntity = world.getEntity(uuid);
+        it.remove();
 
-            Entity orbitEntity = world.getEntity(uuid);
-            it.remove();
+        if (orbitEntity != null && !orbitEntity.isRemoved()) {
+            // Keep gravity disabled so it flies like a laser
+            orbitEntity.setNoGravity(true);
 
-            if (orbitEntity != null && !orbitEntity.isRemoved()) {
-                orbitEntity.setNoGravity(false);
-
-                if (orbitEntity instanceof FallingBlockEntity fb) {
-                    fb.time = 0;
-                    fb.dropItem = false;
-                }
-
-                double spreadH = (thrown == 0) ? 0 : (thrown % 2 == 0 ? 1 : -1) * DEBRIS_THROW_SPREAD * (double)((thrown + 1) / 2);
-                double spreadV = (world.random.nextDouble() - 0.5) * DEBRIS_THROW_SPREAD * 0.5;
-
-                Vec3 vel = look.scale(DEBRIS_THROW_SPEED).add(right.scale(spreadH)).add(up.scale(spreadV));
-                orbitEntity.setDeltaMovement(vel);
-                orbitEntity.hasImpulse = true;
-
-                caster.thrownBlocks.put(uuid, orbitEntity.position());
-
-                spawnImpactRing(world, orbitEntity.position(), 8, 0.25);
-                world.sendParticles(TK_MAGENTA, orbitEntity.getX(), orbitEntity.getY(), orbitEntity.getZ(), 4, 0.2, 0.2, 0.2, 0.06);
+            if (orbitEntity instanceof FallingBlockEntity fb) {
+                fb.time = -32768; // Keep it alive mid-air
+                fb.dropItem = false;
             }
-            thrown++;
-        }
 
-        if (thrown > 0) {
-            caster.debrisThrowCd = DEBRIS_THROW_COOLDOWN;
-            world.playSound(null, player.blockPosition(), SoundEvents.WARDEN_SONIC_BOOM, player.getSoundSource(), 0.8f, 1.1f);
-            world.playSound(null, player.blockPosition(), SoundEvents.STONE_BREAK, player.getSoundSource(), 1.2f, 1.2f);
+            // Raycast to find the exact target point so blocks converge on the crosshair
+            Vec3 eyePos = player.getEyePosition();
+            Vec3 look = player.getViewVector(1.0f);
+            Vec3 targetPoint = eyePos.add(look.scale(60.0));
+
+            var hit = world.clip(new ClipContext(eyePos, targetPoint, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+            if (hit.getType() != HitResult.Type.MISS) {
+                targetPoint = hit.getLocation();
+            }
+
+            // Fire FROM the block's current orbit position TOWARDS the crosshair target
+            Vec3 vel = targetPoint.subtract(orbitEntity.position()).normalize().scale(DEBRIS_THROW_SPEED);
+            orbitEntity.setDeltaMovement(vel);
+            orbitEntity.hasImpulse = true;
+
+            caster.thrownBlocks.put(uuid, orbitEntity.position());
+
+            spawnImpactRing(world, orbitEntity.position(), 8, 0.25);
+            world.sendParticles(TK_MAGENTA, orbitEntity.getX(), orbitEntity.getY(), orbitEntity.getZ(), 4, 0.2, 0.2, 0.2, 0.06);
+
+            world.playSound(null, player.blockPosition(), SoundEvents.EGG_THROW, player.getSoundSource(), 1.0f, 0.6f);
+            world.playSound(null, player.blockPosition(), SoundEvents.ENDER_DRAGON_FLAP, player.getSoundSource(), 0.8f, 1.8f);
+
+            caster.debrisThrowCd = 3; // Limit to ~6 per second when holding/spamming
         }
     }
 
@@ -918,7 +1046,9 @@ public class TelekinesisPower implements PowerInterface {
 
             entry.setValue(ent.position());
 
-            boolean hitSomething = ent.horizontalCollision || ent.onGround();
+            Vec3 vel = ent.getDeltaMovement();
+            // Checks for physical collision OR if velocity drops off indicating friction from cobwebs/fluids
+            boolean hitSomething = ent.horizontalCollision || ent.onGround() || vel.lengthSqr() < 0.2;
 
             if (hitSomething) {
                 triggerDebrisExplosion(player, world, ent.position());
@@ -969,6 +1099,9 @@ public class TelekinesisPower implements PowerInterface {
 
         long idleTime = time - caster.lastSwingTime;
 
+        // Ensure we don't try to regen while we are still initially arming the sequence
+        if (!field.harvestQueue.isEmpty()) return;
+
         if (idleTime < DEBRIS_REGEN_DELAY_TICKS) return;
         if (time % DEBRIS_REGEN_INTERVAL != 0) return;
         if (field.orbitAngles.size() >= DEBRIS_MAX_BLOCKS) return;
@@ -981,28 +1114,88 @@ public class TelekinesisPower implements PowerInterface {
     }
 
     private void spawnOrbitBlock(ServerPlayer player, ServerLevel world, DebrisField field) {
-        BlockPos pos = player.blockPosition().below();
-        BlockState state = Blocks.STONE.defaultBlockState();
+        // Find a valid block to rip up
+        BlockPos targetPos = null;
+        BlockPos center = player.blockPosition();
+        int radius = 8;
+        for (int i = 0; i < 30; i++) {
+            BlockPos p = center.offset(
+                    world.random.nextInt(radius * 2) - radius,
+                    world.random.nextInt(8) - 4,
+                    world.random.nextInt(radius * 2) - radius
+            );
+            if (isHarvestable(world, p)) {
+                targetPos = p;
+                break;
+            }
+        }
 
-        FallingBlockEntity block = FallingBlockEntity.fall(world, pos, state);
-        block.setNoGravity(true);
-        block.dropItem = false;
-        block.time = -32768;
+        BlockState state;
+        double px, py, pz;
 
-        field.orbitAngles.put(block.getUUID(), world.random.nextDouble() * Math.PI * 2);
+        if (targetPos != null) {
+            state = world.getBlockState(targetPos);
+            px = targetPos.getX() + 0.5;
+            py = targetPos.getY();
+            pz = targetPos.getZ() + 0.5;
+            world.playSound(null, targetPos, SoundEvents.STONE_BREAK, SoundSource.PLAYERS, 1.5f, 0.6f);
+            world.sendParticles(TK_MAGENTA, px, py + 0.5, pz, 10, 0.3, 0.3, 0.3, 0.05);
 
-        world.sendParticles(TK_MAGENTA,
-                block.getX(), block.getY(), block.getZ(),
-                6, 0.2, 0.2, 0.2, 0.05);
+            FallingBlockEntity block = FallingBlockEntity.fall(world, targetPos, state);
+            block.setNoGravity(true);
+            block.dropItem = false;
+            block.time = -32768;
+            block.addTag("tk_debris");
+            block.addTag(player.getStringUUID());
+            field.orbitAngles.put(block.getUUID(), world.random.nextDouble() * Math.PI * 2);
+        } else {
+            // Conjure one out of thin air safely if no blocks found
+            state = Blocks.STONE.defaultBlockState();
+            px = player.getX();
+            py = player.getY() + 2.0;
+            pz = player.getZ();
 
-        world.playSound(null, player.blockPosition(),
-                SoundEvents.STONE_PLACE,
-                player.getSoundSource(), 0.4f, 1.2f);
+            // To bypass the private constructor without destroying the player's footing,
+            // we spawn it far above, then restore the original block immediately.
+            BlockPos safePos = player.blockPosition().above(15);
+            BlockState original = world.getBlockState(safePos);
+
+            FallingBlockEntity block = FallingBlockEntity.fall(world, safePos, state);
+            world.setBlock(safePos, original, 3);
+
+            block.setPos(px, py, pz);
+            block.setNoGravity(true);
+            block.dropItem = false;
+            block.time = -32768;
+            block.addTag("tk_debris");
+            block.addTag(player.getStringUUID());
+
+            field.orbitAngles.put(block.getUUID(), world.random.nextDouble() * Math.PI * 2);
+        }
     }
 
     private static Entity resolveOwner(UUID ownerUuid, ServerLevel world) {
         if (ownerUuid == null) return null;
         return world.getServer().getPlayerList().getPlayer(ownerUuid);
+    }
+
+    // OTHER HELPERS
+    public static boolean cleanseTelekinesis(LivingEntity target) {
+        TKVictimState vState = ACTIVE_VICTIMS.get(target.getUUID());
+        if (vState != null && (vState.suspendTicks > 0 || vState.chokeTicks > 0 || vState.yankTicks > 0)) {
+            // Clear the active control states
+            vState.suspendTicks = 0;
+            vState.chokeTicks = 0;
+            vState.suspendOwner = null;
+
+            vState.yankTicks = 0;
+            vState.yankOwner = null;
+
+            // strip slowness
+            target.removeEffect(MobEffects.MOVEMENT_SLOWDOWN);
+            return true;
+        }
+        return false;
     }
 
     /* ============================================================
@@ -1015,7 +1208,7 @@ public class TelekinesisPower implements PowerInterface {
     @Override public String getSecondaryName() { return Component.translatable("power.loopypowers.telekinesis.secondary_name").getString(); }
     @Override public String getUltimateName()  { return Component.translatable("power.loopypowers.telekinesis.ultimate_name").getString(); }
 
-    @Override public long getPrimaryCooldownMs()   { return 11_000; }
+    @Override public long getPrimaryCooldownMs()   { return 9_000; }
     @Override public long getSecondaryCooldownMs() { return 24_000; }
     @Override public long getUltimateCooldownMs()  { return 310_000; }
 

@@ -946,6 +946,10 @@ public class PowerCommand {
     private static void debugCooldownMultiplier(CommandSourceStack src, Collection<ServerPlayer> targets, float mult) {
         for (ServerPlayer p : targets) {
             PowerManager.setPlayerCooldownMultiplier(p, mult);
+
+            // Persist i
+            PlayerDataStore.save(p);
+
             p.sendSystemMessage(Component.literal("§aYour cooldown multiplier was set to " + mult + "x."));
         }
         src.sendSuccess(() -> Component.literal("Set cooldown multiplier to " + mult + "x for " + targets.size() + " player(s)."), false);
@@ -1087,14 +1091,14 @@ public class PowerCommand {
 
     // ---------- Debug: toggle cooldowns ----------
 
-    // tracks the current disabled state so toggle knows which way to flip
-    private static boolean cooldownsCurrentlyDisabled = false;
-
     private static int debugToggleCooldowns(CommandContext<CommandSourceStack> ctx) {
-        cooldownsCurrentlyDisabled = !cooldownsCurrentlyDisabled;
-        PowerManager.setCooldownsDisabled(cooldownsCurrentlyDisabled);
+        boolean newState = !PowerManager.areCooldownsDisabled();
+        PowerManager.setCooldownsDisabled(newState);
 
-        String state = cooldownsCurrentlyDisabled ? "§cDISABLED" : "§aENABLED";
+        // save global state
+        PlayerDataStore.saveGlobal(ctx.getSource().getServer());
+
+        String state = newState ? "§cDISABLED" : "§aENABLED";
         ctx.getSource().sendSuccess(() -> Component.literal("Cooldown system is now " + state + "§f."), true);
         return 1;
     }

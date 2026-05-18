@@ -104,16 +104,15 @@ public class SoundPower implements PowerInterface {
     private static final double BOLT_SPEED         = 1.7;
 
     // Secondary
-    private static final int    BD_PULSE_COUNT       = 6;
-    private static final int    BD_PULSE_GAP_TICKS   = 4;
-    private static final int    BD_FINAL_DELAY_TICKS = 2;
+    private static final int    BD_PULSE_COUNT       = 9;
+    private static final int    BD_FINAL_DELAY_TICKS = 6;
     private static final double BD_PULL_RADIUS       = 10.0;
     private static final double BD_FINAL_RADIUS      = 7.0;
-    private static final float  BD_PULL_STRENGTH     = 0.11f;
+    private static final float  BD_PULL_STRENGTH     = 0.19f;
     private static final float  BD_PULL_UP           = 0.02f;
-    private static final float  BD_FINAL_KB          = 0.85f;
-    private static final float  BD_FINAL_UP          = 0.25f;
-    private static final float  BD_FINAL_DAMAGE      = 14.5f;
+    private static final float  BD_FINAL_KB          = 1.15f;
+    private static final float  BD_FINAL_UP          = 0.30f;
+    private static final float  BD_FINAL_DAMAGE      = 15.5f;
     private static final int    BD_FINAL_STUN_TICKS  = 40;
     private static final int    BD_REMOTE_STUN_TICKS = 30;
 
@@ -397,7 +396,7 @@ public class SoundPower implements PowerInterface {
 
         BassDropState s = new BassDropState();
         s.nextPulse = BD_PULSE_COUNT;
-        s.nextPulseIn = 0;
+        s.nextPulseIn = 0; // do first one instatly now
         s.finalPending = false;
 
         caster.bdState = s;
@@ -418,7 +417,9 @@ public class SoundPower implements PowerInterface {
             if (s.nextPulseIn <= 0 && s.nextPulse > 0) {
                 doBassPullPulse(w, caster, s);
                 s.nextPulse--;
-                s.nextPulseIn = BD_PULSE_GAP_TICKS;
+
+                // spacing accel
+                s.nextPulseIn = Math.max(2, s.nextPulse * 2);
 
                 if (s.nextPulse <= 0) {
                     s.finalPending = true;
@@ -433,6 +434,37 @@ public class SoundPower implements PowerInterface {
 
         doBassFinalBurst(w, caster, state, s.scanned);
         state.bdState = null;
+    }
+
+    private static void doBassPullPulse(ServerLevel w, ServerPlayer caster, BassDropState s) {
+        Vec3 cPos = caster.position();
+
+        AABB box = new AABB(cPos, cPos).inflate(BD_PULL_RADIUS, 6.0, BD_PULL_RADIUS);
+        List<LivingEntity> targets = w.getEntitiesOfClass(LivingEntity.class, box, e -> e.isAlive() && e != caster);
+
+        // pitch accel
+        float pitch = 1.0f + ((BD_PULSE_COUNT - s.nextPulse) * 0.15f);
+
+        w.playSound(null, caster.getX(), caster.getY(), caster.getZ(), ModSounds.BASSSINGLE.get(), caster.getSoundSource(), 0.6f, pitch);
+        w.sendParticles(ParticleTypes.SONIC_BOOM, cPos.x, cPos.y + 1.0, cPos.z, 1, 0, 0, 0, 0);
+
+        spawnPullContractingSphere(w, cPos);
+        spawnSphereShell(w, cPos, BD_PULL_RADIUS * 0.65, 12, ParticleTypes.SCULK_SOUL, 0.9);
+
+        s.pullVizStep = 0;
+
+        for (LivingEntity t : targets) {
+            Vec3 toCaster = cPos.subtract(t.position());
+            Vec3 horiz = new Vec3(toCaster.x, 0.0, toCaster.z);
+            if (horiz.lengthSqr() < 1.0e-6) continue;
+
+            Vec3 dir = horiz.normalize();
+            t.setDeltaMovement(t.getDeltaMovement().add(dir.x * BD_PULL_STRENGTH, BD_PULL_UP, dir.z * BD_PULL_STRENGTH));
+            t.hasImpulse = true;
+
+            w.sendParticles(ParticleTypes.SCULK_CHARGE_POP, t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(), 2, 0.12, 0.10, 0.12, 0.01);
+            s.scanned.add(t.getUUID());
+        }
     }
 
     private static void doBassFinalBurst(ServerLevel w, ServerPlayer caster, SoundCasterState state, java.util.Set<UUID> scanned) {
@@ -474,34 +506,6 @@ public class SoundPower implements PowerInterface {
             applyBassBurstHit(caster, t, 0.0f, BD_REMOTE_STUN_TICKS);
         }
         CameraShake.shakeNearby(caster, 5,15, 0.04f);
-    }
-
-    private static void doBassPullPulse(ServerLevel w, ServerPlayer caster, BassDropState s) {
-        Vec3 cPos = caster.position();
-
-        AABB box = new AABB(cPos, cPos).inflate(BD_PULL_RADIUS, 6.0, BD_PULL_RADIUS);
-        List<LivingEntity> targets = w.getEntitiesOfClass(LivingEntity.class, box, e -> e.isAlive() && e != caster);
-
-        w.playSound(null, caster.getX(), caster.getY(), caster.getZ(), ModSounds.BASSSINGLE.get(), caster.getSoundSource(), 0.6f, 1.6f);
-        w.sendParticles(ParticleTypes.SONIC_BOOM, cPos.x, cPos.y + 1.0, cPos.z, 1, 0, 0, 0, 0);
-
-        spawnPullContractingSphere(w, cPos);
-        spawnSphereShell(w, cPos, BD_PULL_RADIUS * 0.65, 12, ParticleTypes.SCULK_SOUL, 0.9);
-
-        s.pullVizStep = 0;
-
-        for (LivingEntity t : targets) {
-            Vec3 toCaster = cPos.subtract(t.position());
-            Vec3 horiz = new Vec3(toCaster.x, 0.0, toCaster.z);
-            if (horiz.lengthSqr() < 1.0e-6) continue;
-
-            Vec3 dir = horiz.normalize();
-            t.setDeltaMovement(t.getDeltaMovement().add(dir.x * BD_PULL_STRENGTH, BD_PULL_UP, dir.z * BD_PULL_STRENGTH));
-            t.hasImpulse = true;
-
-            w.sendParticles(ParticleTypes.SCULK_CHARGE_POP, t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(), 2, 0.12, 0.10, 0.12, 0.01);
-            s.scanned.add(t.getUUID());
-        }
     }
 
     private static void applyBassBurstHit(ServerPlayer caster, LivingEntity target, float damage, int stunTicks) {
@@ -788,6 +792,21 @@ public class SoundPower implements PowerInterface {
             }
             p = p.add(step);
         }
+    }
+
+    // OTHER HELPER
+    public static boolean cleanseResonance(LivingEntity target) {
+        SoundVictimState state = VICTIM_STATES.get(target.getUUID());
+        if (state != null && (state.score > 0 || state.resonatedTicks > 0)) {
+            state.score = 0;
+            state.resonatedTicks = 0;
+            state.immunityTicks = RES_IMMUNITY_TICKS;
+
+            // Remove the glowing outline if they were fully resonated
+            target.removeEffect(MobEffects.GLOWING);
+            return true;
+        }
+        return false;
     }
 
     /* ============================================================

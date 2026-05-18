@@ -2,16 +2,13 @@ package com.loopy.loopypowers.client;
 
 import com.loopy.loopypowers.client.fx.*;
 import com.loopy.loopypowers.entity.ModEntities;
-import com.loopy.loopypowers.item.ModItems;
 import com.loopy.loopypowers.network.AbilityPackets;
 import com.loopy.loopypowers.network.ClientPowerState;
+import com.loopy.loopypowers.network.payload.*;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.entity.NoopRenderer;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -19,8 +16,6 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
-import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
-import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -42,15 +37,16 @@ public class LoopypowersClient {
     public static class ClientModBusEvents {
 
         @SubscribeEvent
-        public static void registerClientExtensions(RegisterClientExtensionsEvent event) {
-            event.registerItem(new IClientItemExtensions() {
-                private static final ResourceLocation WINGS_TEXTURE =
-                        ResourceLocation.fromNamespaceAndPath("loopypowers", "textures/entity/wings_of_valor.png");
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public static void addEntityLayers(EntityRenderersEvent.AddLayers event) {
+            for (var skinName : event.getSkins()) {
+                var renderer = event.getSkin(skinName);
 
-                public ResourceLocation getCustomElytraTexture(ItemStack stack, LivingEntity entity) {
-                    return WINGS_TEXTURE;
+                // Cast the base renderer to a LivingEntityRenderer so we can access addLayer()
+                if (renderer instanceof net.minecraft.client.renderer.entity.LivingEntityRenderer livingRenderer) {
+                    livingRenderer.addLayer(new com.loopy.loopypowers.client.render.WingsOfValorLayer(livingRenderer, event.getEntityModels()));
                 }
-            }, ModItems.WINGS_OF_VALOR.get());
+            }
         }
 
         @SubscribeEvent
@@ -88,57 +84,57 @@ public class LoopypowersClient {
         public static void registerNetwork(RegisterPayloadHandlersEvent event) {
             PayloadRegistrar registrar = event.registrar("loopypowers").versioned("1.0.0");
 
-            registrar.playToClient(
-                    AbilityPackets.SyncStrengthPayload.ID,
-                    AbilityPackets.SyncStrengthPayload.CODEC,
-                    (AbilityPackets.SyncStrengthPayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            ClientPowerState.setStrengthPower(payload.hasStrength()))
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.HidePlayerPayload.ID,
-                    AbilityPackets.HidePlayerPayload.CODEC,
-                    (AbilityPackets.HidePlayerPayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            HiddenPlayersClient.hide(payload.entityId(), payload.ticks()))
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.CameraShakePayload.ID,
-                    AbilityPackets.CameraShakePayload.CODEC,
-                    (AbilityPackets.CameraShakePayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            com.loopy.loopypowers.client.fx.CameraShakeClient.start(payload.ticks(), payload.strength()))
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.StunAudioPayload.ID,
-                    AbilityPackets.StunAudioPayload.CODEC,
-                    (AbilityPackets.StunAudioPayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            StunAudioClient.setStun(payload.ticks()))
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.ResonanceTrailPayload.ID,
-                    AbilityPackets.ResonanceTrailPayload.CODEC,
-                    (AbilityPackets.ResonanceTrailPayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            SoundFX.addTrailPoints(payload.targetId(), payload.count(), payload.intensity())
-                    )
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.ResonanceRingPayload.ID,
-                    AbilityPackets.ResonanceRingPayload.CODEC,
-                    (AbilityPackets.ResonanceRingPayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            SoundFX.spawnRing(payload.targetId(), payload.intensity())
-                    )
-            );
-
-            registrar.playToClient(
-                    AbilityPackets.ResonanceLinePayload.ID,
-                    AbilityPackets.ResonanceLinePayload.CODEC,
-                    (AbilityPackets.ResonanceLinePayload payload, IPayloadContext context) -> context.enqueueWork(() ->
-                            SoundFX.setLine(payload.targetId(), payload.ticks())
-                    )
-            );
+            // strength
+            registrar.playToClient(AbilityPackets.SyncStrengthPayload.ID, AbilityPackets.SyncStrengthPayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> ClientPowerState.setStrengthPower(p.hasStrength())));
+            // hidden players
+            registrar.playToClient(AbilityPackets.HidePlayerPayload.ID, AbilityPackets.HidePlayerPayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> HiddenPlayersClient.hide(p.entityId(), p.ticks())));
+            // camerashake
+            registrar.playToClient(AbilityPackets.CameraShakePayload.ID, AbilityPackets.CameraShakePayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.CameraShakeClient.start(p.ticks(), p.strength())));
+            // stun audio
+            registrar.playToClient(AbilityPackets.StunAudioPayload.ID, AbilityPackets.StunAudioPayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> StunAudioClient.setStun(p.ticks())));
+            // resonance (sound
+            registrar.playToClient(AbilityPackets.ResonanceTrailPayload.ID, AbilityPackets.ResonanceTrailPayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> SoundFX.addTrailPoints(p.targetId(), p.count(), p.intensity())));
+            registrar.playToClient(AbilityPackets.ResonanceRingPayload.ID, AbilityPackets.ResonanceRingPayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> SoundFX.spawnRing(p.targetId(), p.intensity())));
+            registrar.playToClient(AbilityPackets.ResonanceLinePayload.ID, AbilityPackets.ResonanceLinePayload.CODEC, (p, ctx) -> ctx.enqueueWork(() -> SoundFX.setLine(p.targetId(), p.ticks())));
+            // flight
+            registrar.playToClient(FlightBoomWindupPayload.TYPE, FlightBoomWindupPayload.STREAM_CODEC, ClientPayloadHandler::handleFlightBoomWindup);
+            registrar.playToClient(FlightBoomDashPayload.TYPE, FlightBoomDashPayload.STREAM_CODEC, ClientPayloadHandler::handleFlightBoomDash);
+            registrar.playToClient(FlightBoomImpactPayload.TYPE, FlightBoomImpactPayload.STREAM_CODEC, ClientPayloadHandler::handleFlightBoomImpact);
+            // healing
+            registrar.playToClient(HealingUltPayload.TYPE, HealingUltPayload.STREAM_CODEC, ClientPayloadHandler::handleHealingUlt);
+            // gravity
+            registrar.playToClient(BlackHoleParticlePayload.TYPE, BlackHoleParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleBlackHoleParticles);
+            // fate
+            registrar.playToClient(FateAuraPayload.TYPE, FateAuraPayload.STREAM_CODEC, ClientPayloadHandler::handleFateAura);
+            // blood
+            registrar.playToClient(BloodWhipPayload.TYPE, BloodWhipPayload.STREAM_CODEC, ClientPayloadHandler::handleBloodWhip);
+            registrar.playToClient(BloodBindPayload.TYPE, BloodBindPayload.STREAM_CODEC, ClientPayloadHandler::handleBloodBind);
+            // dimensional
+            registrar.playToClient(BlackoutFxPayload.TYPE, BlackoutFxPayload.STREAM_CODEC, ClientPayloadHandler::handleBlackoutFx);
+            registrar.playToClient(FractureFxPayload.TYPE, FractureFxPayload.STREAM_CODEC, ClientPayloadHandler::handleFractureFx);
+            // explosion
+            registrar.playToClient(ExplosionDropZonePayload.TYPE, ExplosionDropZonePayload.STREAM_CODEC, ClientPayloadHandler::handleExplosionDropZone);
+            // fire
+            registrar.playToClient(FireUltPayload.TYPE, FireUltPayload.STREAM_CODEC, ClientPayloadHandler::handleFireUltFx);
+            // fortune
+            registrar.playToClient(DuelBeamPayload.TYPE, DuelBeamPayload.STREAM_CODEC, ClientPayloadHandler::handleDuelBeam);
+            registrar.playToClient(DuelTetherPayload.TYPE, DuelTetherPayload.STREAM_CODEC, ClientPayloadHandler::handleDuelTether);
+            registrar.playToClient(DuelAuraPayload.TYPE, DuelAuraPayload.STREAM_CODEC, ClientPayloadHandler::handleDuelAura);
+            registrar.playToClient(HouseRoofFxPayload.TYPE, HouseRoofFxPayload.STREAM_CODEC, ClientPayloadHandler::handleHouseRoofFx);
+            // lightning
+            registrar.playToClient(StormCloudPayload.TYPE, StormCloudPayload.STREAM_CODEC, ClientPayloadHandler::handleStormCloud);
+            //nature
+            registrar.playToClient(NatureCageFxPayload.TYPE, NatureCageFxPayload.STREAM_CODEC, ClientPayloadHandler::handleNatureCageFx);
+            registrar.playToClient(NatureGasFxPayload.TYPE, NatureGasFxPayload.STREAM_CODEC, ClientPayloadHandler::handleNatureGasFx);
+            registrar.playToClient(NatureTetherFxPayload.TYPE, NatureTetherFxPayload.STREAM_CODEC, ClientPayloadHandler::handleNatureTetherFx);
+            // ice
+            registrar.playToClient(IceSpikeTrailPayload.TYPE, IceSpikeTrailPayload.STREAM_CODEC, ClientPayloadHandler::handleIceSpikeTrail);
+            registrar.playToClient(IceSpikePuffPayload.TYPE, IceSpikePuffPayload.STREAM_CODEC, ClientPayloadHandler::handleIceSpikePuff);
+            registrar.playToClient(IceFreezeStagePayload.TYPE, IceFreezeStagePayload.STREAM_CODEC, ClientPayloadHandler::handleIceFreezeStage);
+            registrar.playToClient(IceShatterPayload.TYPE, IceShatterPayload.STREAM_CODEC, ClientPayloadHandler::handleIceShatter);
+            registrar.playToClient(IceBeamChargePayload.TYPE, IceBeamChargePayload.STREAM_CODEC, ClientPayloadHandler::handleIceBeamCharge);
+            registrar.playToClient(IceBeamFirePayload.TYPE, IceBeamFirePayload.STREAM_CODEC, ClientPayloadHandler::handleIceBeamFire);
+            registrar.playToClient(IceBlizzardPayload.TYPE, IceBlizzardPayload.STREAM_CODEC, ClientPayloadHandler::handleIceBlizzard);
         }
     }
 

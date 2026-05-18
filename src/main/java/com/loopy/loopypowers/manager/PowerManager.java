@@ -2,12 +2,12 @@ package com.loopy.loopypowers.manager;
 
 import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.ui.CooldownUI;
-// import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.network.AbilityPackets;
 import com.loopy.loopypowers.power.*;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -242,9 +242,9 @@ public class PowerManager {
         }
 
 
-         if (player.hasEffect(ModEffects.DISPLACED) && !(power instanceof HealingPower)) {
-           CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
-           return;
+        if (player.hasEffect(ModEffects.DISPLACED) && !(power instanceof HealingPower)) {
+            CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
+            return;
         }
 
         String key = abilityKey(power, AbilityTypes.PRIMARY);
@@ -327,10 +327,9 @@ public class PowerManager {
     }
 
     private static long modifyCooldown(ServerPlayer player, PowerInterface power, AbilityTypes type, long baseMs) {
-        // TODO: Uncomment when StrengthPower is ported
-        // if (power instanceof StrengthPower && type != AbilityTypes.ULTIMATE && StrengthPower.isRaging(player)) {
-        //    return Math.max(250L, (long)(baseMs * 0.20));
-        // }
+        if (power instanceof StrengthPower && type != AbilityTypes.ULTIMATE && StrengthPower.isRaging(player)) {
+        return Math.max(250L, (long)(baseMs * 0.15));
+        }
         return baseMs;
     }
 
@@ -370,11 +369,40 @@ public class PowerManager {
        PERSISTENCE  (called by PlayerDataStore)
        ============================================================ */
 
+    private static boolean globalStateLoaded = false;
+
+    public static void checkLoadGlobalState(MinecraftServer server) {
+        if (!globalStateLoaded && server != null) {
+            PlayerDataStore.loadGlobal(server);
+            globalStateLoaded = true;
+        }
+    }
+
+    public static CompoundTag saveGlobalState() {
+        CompoundTag tag = new CompoundTag();
+        tag.putBoolean("cooldowns_disabled", COOLDOWNS_DISABLED);
+        tag.putDouble("global_cd_mult", GLOBAL_CD_MULT);
+        return tag;
+    }
+
+    public static void loadGlobalState(CompoundTag tag) {
+        if (tag.contains("cooldowns_disabled")) COOLDOWNS_DISABLED = tag.getBoolean("cooldowns_disabled");
+        if (tag.contains("global_cd_mult")) GLOBAL_CD_MULT = tag.getDouble("global_cd_mult");
+    }
+
     public static void saveToNbt(ServerPlayer player, CompoundTag nbt) {
         PowerInterface power = getPower(player);
         if (power != null) nbt.putString("lp_power", power.getName());
 
         nbt.putInt("lp_level", getLevel(player));
+
+        // Save toggle states and modifiers
+        nbt.putBoolean("lp_passive", PassiveManager.isEnabled(player));
+
+        Double cdMult = PLAYER_CD_MULT.get(player.getUUID());
+        if (cdMult != null) {
+            nbt.putDouble("lp_cd_mult", cdMult);
+        }
 
         Map<String, Long> cds = COOLDOWN_END_MS.get(player.getUUID());
         if (cds != null && !cds.isEmpty()) {
@@ -387,6 +415,9 @@ public class PowerManager {
     }
 
     public static void loadFromNbt(ServerPlayer player, CompoundTag nbt) {
+        // Ensures the global file is loaded when the first player joins
+        checkLoadGlobalState(player.getServer());
+
         if (nbt.contains("lp_power")) {
             String name = nbt.getString("lp_power");
             for (PowerInterface p : ALL_POWERS) {
@@ -401,6 +432,17 @@ public class PowerManager {
 
         if (nbt.contains("lp_level")) {
             setLevel(player, nbt.getInt("lp_level"));
+        }
+
+        // Load toggle states and modifiers
+        if (nbt.contains("lp_passive")) {
+            PassiveManager.setPassiveState(player, nbt.getBoolean("lp_passive"));
+        } else {
+            PassiveManager.setPassiveState(player, true);
+        }
+
+        if (nbt.contains("lp_cd_mult")) {
+            PLAYER_CD_MULT.put(player.getUUID(), nbt.getDouble("lp_cd_mult"));
         }
 
         if (nbt.contains("lp_cooldowns")) {
@@ -432,6 +474,7 @@ public class PowerManager {
         PLAYER_LEVELS.remove(id);
         COOLDOWN_END_MS.remove(id);
         PLAYER_CD_MULT.remove(id);
+        PassiveManager.setPassiveState(player, true);
     }
 
     public static boolean areCooldownsDisabled() {

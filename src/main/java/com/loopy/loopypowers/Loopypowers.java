@@ -1,7 +1,6 @@
 package com.loopy.loopypowers;
 
 import com.loopy.loopypowers.block.ModBlocks;
-import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.entity.ModEntities;
@@ -19,7 +18,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.tags.DamageTypeTags;              // net.minecraft.registry.tag -> net.minecraft.tags
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.entity.LivingEntity;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -33,8 +32,6 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 // NeoForge entry point: @Mod replaces ModInitializer.
 // The constructor receives the mod-bus (for registry/setup events) via injection.
@@ -59,61 +56,13 @@ public class Loopypowers {
         ModBlocks.register(modEventBus);
         ModEffects.register(modEventBus);
 
-        // tell bus registration bull fucking shit
-        modEventBus.addListener(this::registerPayloads);
-
         // ── Lifecycle setup (runs after registries are frozen) ──
         modEventBus.addListener(this::commonSetup);
 
-        // ── Game-world event listeners go on the FORGE/NeoForge event bus ──
+        // ── Game-world event listeners ──
         NeoForge.EVENT_BUS.register(this);
 
         LOGGER.info("Loopypowers loaded!");
-    }
-
-    private void registerPayloads(final RegisterPayloadHandlersEvent event) {
-        final PayloadRegistrar registrar = event.registrar(MOD_ID);
-
-        registrar.playToClient( // black hole
-                BlackHoleParticlePayload.TYPE,
-                BlackHoleParticlePayload.STREAM_CODEC,
-                ClientPayloadHandler::handleBlackHoleParticles
-        );
-        registrar.playToClient( // fate effect
-                FateAuraPayload.TYPE,
-                FateAuraPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleFateAura
-        );
-        registrar.playToClient( // blood whip
-                BloodWhipPayload.TYPE,
-                BloodWhipPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleBloodWhip
-        );
-        registrar.playToClient( // blood ult
-                BloodBindPayload.TYPE,
-                BloodBindPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleBloodBind
-        );
-        registrar.playToClient( // darkness ult
-                BlackoutFxPayload.TYPE,
-                BlackoutFxPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleBlackoutFx
-        ); // dimensional ult
-        registrar.playToClient(
-                FractureFxPayload.TYPE,
-                FractureFxPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleFractureFx
-        );
-        registrar.playToClient( // explosion ult
-                ExplosionDropZonePayload.TYPE,
-                ExplosionDropZonePayload.STREAM_CODEC,
-                ClientPayloadHandler::handleExplosionDropZone
-        );
-        registrar.playToClient( // fire
-                FireUltPayload.TYPE,
-                FireUltPayload.STREAM_CODEC,
-                ClientPayloadHandler::handleFireUltFx
-        );
     }
 
     /* ============================================================
@@ -227,20 +176,27 @@ public class Loopypowers {
         // source.isIn(tag) -> source.is(tag), net.minecraft.registry.tag -> net.minecraft.tags
         if (source.is(DamageTypeTags.IS_FALL)) {
             if (victim.hasEffect(ModEffects.BRACED)) {
-                // removeCustomEffect(victim, ModEffects.BRACED) -> victim.removeEffect(ModEffects.BRACED)
                 victim.removeEffect(ModEffects.BRACED);
-                // victim.getWorld() -> victim.level()
                 if (victim.level() instanceof ServerLevel w) {
-                    // victim.getBlockPos() -> victim.blockPosition()
-                    // SoundEvents.BLOCK_WOOL_FALL -> SoundEvents.WOOL_FALL
-                    // SoundCategory.PLAYERS -> SoundSource.PLAYERS
-                    // w.spawnParticles -> w.sendParticles
                     w.playSound(null, victim.blockPosition(), SoundEvents.WOOL_FALL, SoundSource.PLAYERS, 0.7f, 1.2f);
                     w.sendParticles(ParticleTypes.CLOUD, victim.getX(), victim.getY(), victim.getZ(), 20, 0.4, 0.1, 0.4, 0.05);
                 }
                 event.setCanceled(true);
                 return;
             }
+        }
+
+        // Psychic Power Global Hook
+        if (PsychicPower.onDamageGlobal(victim, source)) {
+            event.setCanceled(true);
+            return;
+        }
+
+        // Telekinesis Power Global Hook
+        float tkAmount = TelekinesisPower.onDamageGlobal(victim, source, amount);
+        if (tkAmount != amount) {
+            amount = tkAmount;
+            event.setAmount(amount);
         }
 
         // ── ATTACKER-SIDE ─────────────────────────────────────────────────

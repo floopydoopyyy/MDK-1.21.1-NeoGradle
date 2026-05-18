@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,6 +34,11 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+
+import net.neoforged.neoforge.network.PacketDistributor;
+import com.loopy.loopypowers.network.payload.DuelBeamPayload;
+import com.loopy.loopypowers.network.payload.DuelTetherPayload;
+import com.loopy.loopypowers.network.payload.DuelAuraPayload;
 
 import java.util.*;
 
@@ -118,7 +124,7 @@ public class FortunePower implements PowerInterface {
 
     // proc chance scales with luck
     private static final float PROC_BASE = 0.04f;           // 4%
-    private static final float PROC_BONUS_AT_MAX = 0.18f;   // // keep in mind base is separate from this and added to this total
+    private static final float PROC_BONUS_AT_MAX = 0.18f;   // keep in mind base is separate from this and added to this total
 
     // spend luck on proc
     private static final int LUCK_SPEND_ON_PROC = 45;
@@ -394,11 +400,13 @@ public class FortunePower implements PowerInterface {
     public void activateSecondary(ServerPlayer player) {
         ServerLevel w = player.serverLevel();
 
-        // If already dueling, recast cancels it
+        // If already dueling, you cannot cancel or overwrite it
         if (isInDuel(player)) {
+            /*
             breakDuel(player.getUUID());
             w.playSound(null, player.blockPosition(), SoundEvents.CHAIN_BREAK, player.getSoundSource(), 0.8f, 1.0f);
             CooldownUI.pushActionbarOverride(player, Component.translatable("power.loopypowers.fortune.duel_ended"), 35);
+            */
             return;
         }
 
@@ -544,70 +552,26 @@ public class FortunePower implements PowerInterface {
     }
 
     private static void spawnDuelBeam(ServerLevel w, Vec3 start, Vec3 end) {
-        Vec3 delta = end.subtract(start);
-        double len = delta.length();
-        if (len < 0.01) return;
-
-        Vec3 dir = delta.scale(1.0 / len);
-        int steps = Mth.clamp((int)(len / 0.35), 8, 120);
-
-        Vec3 p = start;
-        for (int i = 0; i <= steps; i++) {
-            w.sendParticles(ParticleTypes.ENCHANT,
-                    p.x, p.y, p.z,
-                    1,
-                    0.02, 0.02, 0.02,
-                    0.0);
-
-            if ((i & 3) == 0) {
-                w.sendParticles(ParticleTypes.CRIT,
-                        p.x, p.y, p.z,
-                        1,
-                        0.02, 0.02, 0.02,
-                        0.02);
-            }
-
-            p = p.add(dir.scale(len / steps));
-        }
+        PacketDistributor.sendToPlayersNear(
+                w, null,
+                start.x, start.y, start.z,
+                64.0D,
+                new DuelBeamPayload(start, end)
+        );
     }
 
     private static void spawnDuelTether(ServerLevel w, LivingEntity a, LivingEntity b) {
-        Vec3 start = a.position().add(0, a.getBbHeight() * 0.65, 0);
-        Vec3 end   = b.position().add(0, b.getBbHeight() * 0.65, 0);
-
-        Vec3 delta = end.subtract(start);
-        double len = delta.length();
-        if (len < 0.01) return;
-
-        Vec3 dir = delta.scale(1.0 / len);
-        int steps = Mth.clamp((int)(len / 0.45), 10, 90);
-
-        Vec3 p = start;
-        for (int i = 0; i <= steps; i++) {
-            w.sendParticles(ParticleTypes.ENCHANT,
-                    p.x, p.y, p.z,
-                    1,
-                    0.03, 0.03, 0.03,
-                    0.0);
-            p = p.add(dir.scale(len / steps));
-        }
-
-        // endpoints
-        w.sendParticles(ParticleTypes.ENCHANT,
-                start.x, start.y, start.z,
-                3, 0.15, 0.15, 0.15, 0.0);
-        w.sendParticles(ParticleTypes.ENCHANT,
-                end.x, end.y, end.z,
-                3, 0.15, 0.15, 0.15, 0.0);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                a,
+                new DuelTetherPayload(a.getId(), b.getId())
+        );
     }
 
     private static void spawnDuelAura(ServerLevel w, LivingEntity e) {
-        Vec3 p = e.position().add(0, e.getBbHeight() * 0.65, 0);
-        w.sendParticles(ParticleTypes.ENCHANT,
-                p.x, p.y, p.z,
-                2,
-                0.18, 0.25, 0.18,
-                0.0);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                e,
+                new DuelAuraPayload(e.getId())
+        );
     }
 
     private static float getDuelMultiplier(LivingEntity victim, LivingEntity attacker) {
@@ -630,8 +594,11 @@ public class FortunePower implements PowerInterface {
     private static final int HOUSE_RADIUS = 8;
     private static final int HOUSE_WALL_LAYERS = 4;
     private static final int HOUSE_BUILD_INTERVAL_TICKS = 7;
-    private static final int HOUSE_ACTIVE_TICKS = 238; // - 2 if a multiple of 40
+    // Increased active ticks by 60 (+3 seconds). This flawlessly fits exactly 4 rules
+    // before the house naturally despawns!
+    private static final int HOUSE_ACTIVE_TICKS = 298;
     private static final int HOUSE_CLEAR_HEIGHT = 10;
+    private static final int HOUSE_MAX_RULES = 4;
 
     // Roof particles
     private static final int HOUSE_ROOF_FX_EVERY_TICKS = 2;
@@ -665,6 +632,10 @@ public class FortunePower implements PowerInterface {
 
     // Double or Nothing
     private static final float RULE_DOUBLE_MULT = 1.25f;
+
+    // The Bouncer
+    private static final float RULE_BOUNCER_DAMAGE = 8.0f;
+    private static final double RULE_BOUNCER_BOUNCE_MULT = 2.6;
 
     // Rule effect duration scaling (all potion rules)
     private static final float HOUSE_RULE_EFFECT_MULT = 1.75f; // e.g. 1.75x longer
@@ -714,7 +685,8 @@ public class FortunePower implements PowerInterface {
         SPOTLIGHT,
         JACKPOT,
         CARD_COUNTER,
-        WOOLIAM_INVASION
+        WOOLIAM_INVASION,
+        BOUNCER
     }
 
     private static final Map<UUID, HouseState> ACTIVE_HOUSES = new HashMap<>();
@@ -737,6 +709,7 @@ public class FortunePower implements PowerInterface {
         // rules
         HouseRule rule = null;
         int ruleLeft = HOUSE_RULE_INTERVAL_TICKS;
+        int rulesPlayed = 0;
 
         // hot seat
         UUID hotSeatHolder = null;
@@ -756,6 +729,7 @@ public class FortunePower implements PowerInterface {
             this.buildWait = HOUSE_BUILD_INTERVAL_TICKS;
             this.activeLeft = HOUSE_ACTIVE_TICKS + (HOUSE_WALL_LAYERS * HOUSE_BUILD_INTERVAL_TICKS) + 20;
             this.built = false;
+            this.rulesPlayed = 0;
         }
     }
 
@@ -856,7 +830,9 @@ public class FortunePower implements PowerInterface {
 
     private static void tickHouseRules(ServerLevel w, HouseState st) {
         if (st.rule == null) {
-            forceNewRule(w, st);
+            if (st.rulesPlayed < HOUSE_MAX_RULES) {
+                forceNewRule(w, st);
+            }
             return;
         }
 
@@ -902,6 +878,13 @@ public class FortunePower implements PowerInterface {
             st.jackpotArmed = false;
         }
 
+        if (st.rulesPlayed >= HOUSE_MAX_RULES) {
+            st.rule = null;
+            return;
+        }
+
+        st.rulesPlayed++;
+
         HouseRule next = rollRule(w, st.rule);
         st.rule = next;
         st.ruleLeft = HOUSE_RULE_INTERVAL_TICKS;
@@ -929,6 +912,13 @@ public class FortunePower implements PowerInterface {
             case DOUBLE_OR_NOTHING -> w.sendParticles(ParticleTypes.ENCHANT,
                     st.center.getX() + 0.5, st.baseY + 1.2, st.center.getZ() + 0.5,
                     18, 0.9, 0.35, 0.9, 0.0);
+
+            case BOUNCER -> {
+                w.sendParticles(ParticleTypes.ELECTRIC_SPARK,
+                        st.center.getX() + 0.5, st.baseY + 1.2, st.center.getZ() + 0.5,
+                        30, 1.0, 0.5, 1.0, 0.1);
+                w.playSound(null, st.center, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 0.5f, 1.8f);
+            }
 
             case SHUFFLE -> doShuffle(w, st);
 
@@ -1186,6 +1176,12 @@ public class FortunePower implements PowerInterface {
 
             e.setDeltaMovement(e.getDeltaMovement().add(sx, up, sz));
             e.hasImpulse = true;
+
+            // sync
+            if (e instanceof ServerPlayer sp) {
+                sp.hurtMarked = true;
+                sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
+            }
 
             w.sendParticles(ParticleTypes.CRIT,
                     e.getX(), e.getY() + e.getBbHeight() * 0.5, e.getZ(),
@@ -1598,6 +1594,11 @@ public class FortunePower implements PowerInterface {
     private static void teleportEntity(ServerLevel w, Entity e, Vec3 pos, float yaw, float pitch) {
         if (e instanceof ServerPlayer sp) {
             sp.teleportTo(w, pos.x, pos.y, pos.z, java.util.Collections.emptySet(), yaw, pitch);
+            // FIX: Sync velocity to 0 after teleporting inside the cage
+            sp.setDeltaMovement(Vec3.ZERO);
+            sp.hasImpulse = true;
+            sp.hurtMarked = true;
+            sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
         } else {
             e.moveTo(pos.x, pos.y, pos.z, yaw, pitch);
             e.setDeltaMovement(Vec3.ZERO);
@@ -1667,6 +1668,8 @@ public class FortunePower implements PowerInterface {
     private static void enforceHousePrison(ServerLevel w, HouseState st) {
         Vec3 center = new Vec3(st.center.getX() + 0.5, st.baseY + 1.0, st.center.getZ() + 0.5);
 
+        boolean isBouncer = (st.rule == HouseRule.BOUNCER);
+
         Iterator<UUID> it = st.inside.iterator();
         while (it.hasNext()) {
             UUID uuid = it.next();
@@ -1680,27 +1683,53 @@ public class FortunePower implements PowerInterface {
 
             double dx = le.getX() - center.x;
             double dz = le.getZ() - center.z;
-            double distSq = dx * dx + dz * dz;
+
+            // Square hitbox check instead of circular
+            double maxDist = Math.max(Math.abs(dx), Math.abs(dz));
 
             // keep them in
-            if (distSq > (HOUSE_RADIUS - 0.8) * (HOUSE_RADIUS - 0.8) && distSq <= (HOUSE_RADIUS + 2) * (HOUSE_RADIUS + 2)) {
-                Vec3 push = center.subtract(le.position()).normalize().scale(0.6);
+            if (maxDist > (HOUSE_RADIUS - 0.8) && maxDist <= (HOUSE_RADIUS + 2.0)) {
+
+                double bounceMult = isBouncer ? 0.6 * RULE_BOUNCER_BOUNCE_MULT : 0.6;
+                Vec3 push = center.subtract(le.position()).normalize().scale(bounceMult);
+
                 le.setDeltaMovement(le.getDeltaMovement().add(push.x, 0.2, push.z));
                 le.hasImpulse = true;
+
+                // FIX: Sync wall bounce velocity to client
+                if (le instanceof ServerPlayer sp) {
+                    sp.hurtMarked = true;
+                    sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
+                }
 
                 // feedback
                 if (w.getGameTime() % 5 == 0) {
                     w.playSound(null, le.blockPosition(), SoundEvents.AMETHYST_BLOCK_HIT, SoundSource.PLAYERS, 1.0f, 0.5f);
-                    w.sendParticles(ParticleTypes.ELECTRIC_SPARK, le.getX(), le.getY() + 1.0, le.getZ(), 10, 0.2, 0.4, 0.2, 0.05);
+                    w.sendParticles(ParticleTypes.ELECTRIC_SPARK, le.getX(), le.getY() + 1.0, le.getZ(), isBouncer ? 25 : 10, 0.2, 0.4, 0.2, isBouncer ? 0.15 : 0.05);
+
+                    // The cage damages people who touch it during The Bouncer
+                    if (isBouncer) {
+                        Entity owner = w.getEntity(st.owner);
+                        le.hurt(ModDamageTypes.house(w, owner), RULE_BOUNCER_DAMAGE);
+                    }
                 }
             }
             // yank if too far central
-            else if (distSq > (HOUSE_RADIUS + 2) * (HOUSE_RADIUS + 2) || le.getY() > st.baseY + HOUSE_WALL_LAYERS + 2 || le.getY() < st.baseY - 1) {
+            else if (maxDist > (HOUSE_RADIUS + 2.0) || le.getY() > st.baseY + HOUSE_WALL_LAYERS + 2 || le.getY() < st.baseY - 1) {
                 teleportEntity(w, le, center, le.getYRot(), le.getXRot());
                 w.playSound(null, le.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 1.0f, 1.2f);
                 w.sendParticles(ParticleTypes.ENCHANTED_HIT, le.getX(), le.getY() + 1.0, le.getZ(), 30, 0.5, 0.5, 0.5, 0.05);
             }
         }
+    }
+
+    // OTHER HELPERS
+    public static boolean cleanseDuel(LivingEntity target) {
+        if (ACTIVE_DUELS.containsKey(target.getUUID())) {
+            breakDuel(target.getUUID());
+            return true;
+        }
+        return false;
     }
 
     // COOLDOWNS

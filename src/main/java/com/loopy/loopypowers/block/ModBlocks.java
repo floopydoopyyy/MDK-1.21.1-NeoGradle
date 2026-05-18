@@ -39,6 +39,7 @@ public class ModBlocks {
                             .lightLevel(state -> 6)
                             .strength(1.0f)
                             .sound(SoundType.GLASS)
+                            .randomTicks()
             )
     );
     public static final DeferredItem<BlockItem> ICE_SPIKE_ITEM = ITEMS.registerSimpleBlockItem("ice_spike", ICE_SPIKE);

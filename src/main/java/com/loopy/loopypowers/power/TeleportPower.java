@@ -3,6 +3,7 @@ package com.loopy.loopypowers.power;
 import com.loopy.loopypowers.ui.CooldownUI;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
+import com.loopy.loopypowers.manager.PowerManager;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -132,7 +133,7 @@ public class TeleportPower implements PowerInterface {
 
         // Primary Charges
         if (state.blinkLockTicks > 0) state.blinkLockTicks--;
-        tickBlinkRecharge(state);
+        tickBlinkRecharge(player, state);
         updateBlinkCooldownUI(player, state);
 
         // tick timers
@@ -201,17 +202,30 @@ public class TeleportPower implements PowerInterface {
 
         // start recharge if not running
         if (state.blinkRechargeTicks < 0) {
-            state.blinkRechargeTicks = PRIMARY_RECHARGE_TICKS;
+            state.blinkRechargeTicks = PowerManager.getModifiedCooldownTicks(player, PRIMARY_RECHARGE_TICKS);
         }
 
         blinkForward(player);
     }
 
-    private static void tickBlinkRecharge(TeleportState state) {
+    private static void tickBlinkRecharge(ServerPlayer player, TeleportState state) {
+        if (PowerManager.areCooldownsDisabled()) {
+            state.blinkCharges = PRIMARY_MAX_CHARGES;
+            state.blinkRechargeTicks = -1;
+            return;
+        }
+
         // if full, exit
         if (state.blinkCharges >= PRIMARY_MAX_CHARGES) {
             state.blinkRechargeTicks = -1;
             return;
+        }
+
+        int maxTicks = PowerManager.getModifiedCooldownTicks(player, PRIMARY_RECHARGE_TICKS);
+
+        // if the timer wasn't running, start it
+        if (state.blinkRechargeTicks <= 0 && state.blinkRechargeTicks != -1) {
+            state.blinkRechargeTicks = maxTicks;
         }
 
         // tick timer
@@ -224,7 +238,7 @@ public class TeleportPower implements PowerInterface {
 
                 // If still not full, start next recharge window
                 if (state.blinkCharges < PRIMARY_MAX_CHARGES) {
-                    state.blinkRechargeTicks = PRIMARY_RECHARGE_TICKS;
+                    state.blinkRechargeTicks = maxTicks;
                 } else {
                     state.blinkRechargeTicks = -1;
                 }
@@ -236,19 +250,21 @@ public class TeleportPower implements PowerInterface {
         String key = "Teleport:PRIMARY";
 
         // hide ui when at full charge
-        if (state.blinkCharges >= PRIMARY_MAX_CHARGES) {
+        if (state.blinkCharges >= PRIMARY_MAX_CHARGES || PowerManager.areCooldownsDisabled()) {
             CooldownUI.clearCooldown(player, key);
             return;
         }
 
+        int maxTicks = PowerManager.getModifiedCooldownTicks(player, PRIMARY_RECHARGE_TICKS);
+
         // show progress towards nearest charge
         int leftTicks = state.blinkRechargeTicks;
-        if (leftTicks < 0) leftTicks = PRIMARY_RECHARGE_TICKS;
+        if (leftTicks < 0) leftTicks = maxTicks;
 
         long endMs = System.currentTimeMillis() + (leftTicks * 50L);
 
         String suffix = makeChargeSuffix(
-                state.blinkCharges, PRIMARY_MAX_CHARGES, leftTicks, PRIMARY_RECHARGE_TICKS
+                state.blinkCharges, PRIMARY_MAX_CHARGES, leftTicks, Math.max(1, maxTicks)
         ).getString();
 
         setCooldownEnd(player, key, endMs, Component.literal(suffix));
@@ -307,9 +323,9 @@ public class TeleportPower implements PowerInterface {
         // Destination
         world.sendParticles(ParticleTypes.PORTAL, safe.x, safe.y + 1, safe.z, 30, 0.4, 0.7, 0.4, 0.1);
 
-        // briefly give haste to refresh attack cooldown instantly
+        // briefly give haste to refresh attack cooldown
         player.addEffect(new MobEffectInstance(
-                MobEffects.DIG_SPEED, 5, 50, true, false, false
+                MobEffects.DIG_SPEED, 5, 100, true, false, false
         ));
     }
 
@@ -413,7 +429,7 @@ public class TeleportPower implements PowerInterface {
 
         // Instantly refresh attack cooldown
         player.addEffect(new MobEffectInstance(
-                MobEffects.DIG_SPEED, 5, 50, true, false, false
+                MobEffects.DIG_SPEED, 5, 100, true, false, false
         ));
     }
 

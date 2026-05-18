@@ -27,6 +27,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.tags.BlockTags;
 import org.joml.Vector3f;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import net.minecraft.world.damagesource.DamageSource;
@@ -71,12 +72,11 @@ public class StrengthPower implements PowerInterface {
        ============================================================ */
 
     // Bullrush
-    private static final int RUSH_TICKS = 26;     // duration
+    private static final int RUSH_TICKS = 28;     // duration
     private static final double RUSH_SPEED = 1.25;
     private static final double RUSH_HIT_RADIUS = 1.3;
-    private static final int RUSH_STEER_TICKS = 7;
     private static final int RUSH_CANCEL_COOLDOWN_TICKS = 4;
-    private static final float RUSH_HIT_DAMAGE = 11.5f;
+    private static final float RUSH_HIT_DAMAGE = 13.5f;
     private static final float RUSH_HIT_KNOCKUP = 0.95f;
     private static final double RUSH_WALL_CHECK_DIST = 0.75;
     private static final int RUSH_WALL_MAX_BLOCKS = 18;
@@ -85,6 +85,7 @@ public class StrengthPower implements PowerInterface {
     private static final float RUSH_CRASH_SELF_DAMAGE = 4.0f;
     private static final float RUSH_CRASH_AOE_DAMAGE = 6.0f;
     private static final double RUSH_CRASH_AOE_RADIUS = 4.5;
+    private static final double RUSH_MAX_TURN_DEG = 4.5; // Degrees per tick of steering
 
     // Rage
     private static final int RAGE_TICKS = 240; // 12s
@@ -97,7 +98,7 @@ public class StrengthPower implements PowerInterface {
     private static final int SLAM_MAX_BLOCKS_BROKEN = 22;
     private static final float SLAM_MAX_HARDNESS = 2.2f;
     private static final float SLAM_BLOCK_BREAK_CHANCE = 0.55f;
-    private static final float SLAM_ENTITY_DAMAGE = 12.0f;
+    private static final float SLAM_ENTITY_DAMAGE = 14.0f;
     private static final float SLAM_OUT = 0.35f;
     private static final float SLAM_FRONT_DOT = 0.35f;
     private static final double SLAM_FRONT_OFFSET = 1.4;
@@ -666,42 +667,49 @@ public class StrengthPower implements PowerInterface {
         Vec3 dir = state.rushDir;
         if (dir == null) dir = player.getViewVector(1.0f).normalize();
 
-        // STEERING WINDOW
-        int elapsed = Math.max(0, RUSH_TICKS - state.rushTicks);
+        // limit steering
+        double maxTurn = Math.toRadians(RUSH_MAX_TURN_DEG);
 
-        if (elapsed < RUSH_STEER_TICKS) {
-            double maxTurnDeg = 14.0;
-            double maxTurn = Math.toRadians(maxTurnDeg);
+        Vec3 look = player.getViewVector(1.0f);
+        Vec3 a = new Vec3(dir.x, 0.0, dir.z);
+        Vec3 b = new Vec3(look.x, 0.0, look.z);
 
-            Vec3 look = player.getViewVector(1.0f);
-            Vec3 a = new Vec3(dir.x, 0.0, dir.z);
-            Vec3 b = new Vec3(look.x, 0.0, look.z);
-
-            if (a.lengthSqr() > 1e-5 && b.lengthSqr() > 1e-5) {
-                a = a.normalize();
-                b = b.normalize();
-                double dot = Mth.clamp(a.dot(b), -1.0, 1.0);
-                double ang = Math.acos(dot);
-                if (ang > maxTurn) {
-                    Vec3 cross = a.cross(b);
-                    double sign = cross.y >= 0 ? 1.0 : -1.0;
-                    double clampedAng = sign * maxTurn;
-                    double cos = Math.cos(clampedAng);
-                    double sin = Math.sin(clampedAng);
-                    double nx = a.x * cos - a.z * sin;
-                    double nz = a.x * sin + a.z * cos;
-                    dir = new Vec3(nx, look.y, nz).normalize();
-                } else {
-                    dir = look;
-                }
-                state.rushDir = dir;
+        if (a.lengthSqr() > 1e-5 && b.lengthSqr() > 1e-5) {
+            a = a.normalize();
+            b = b.normalize();
+            double dot = Mth.clamp(a.dot(b), -1.0, 1.0);
+            double ang = Math.acos(dot);
+            if (ang > maxTurn) {
+                Vec3 cross = a.cross(b);
+                double sign = cross.y >= 0 ? -1.0 : 1.0; // Flipped sign to fix inverted steering
+                double clampedAng = sign * maxTurn;
+                double cos = Math.cos(clampedAng);
+                double sin = Math.sin(clampedAng);
+                double nx = a.x * cos - a.z * sin;
+                double nz = a.x * sin + a.z * cos;
+                dir = new Vec3(nx, look.y, nz).normalize();
+            } else {
+                dir = look;
             }
+            state.rushDir = dir;
         }
 
         ServerLevel w = player.serverLevel();
 
         Vec3 horiz = new Vec3(dir.x, 0.0, dir.z);
         if (horiz.lengthSqr() < 1.0e-6) horiz = new Vec3(1, 0, 0);
+
+        // break soft blocks
+        BlockPos basePos = player.blockPosition();
+        for (BlockPos bPos : BlockPos.betweenClosed(basePos.offset(-1, 0, -1), basePos.offset(1, 1, 1))) {
+            BlockState bs = w.getBlockState(bPos);
+            if (!bs.isAir()) {
+                if (bs.canBeReplaced() || bs.is(BlockTags.LEAVES) || bs.is(BlockTags.FLOWERS)
+                        || bs.is(BlockTags.SMALL_FLOWERS) || bs.is(BlockTags.TALL_FLOWERS)) {
+                    w.destroyBlock(bPos, true, player);
+                }
+            }
+        }
 
         BlockHitResult wallHit = findRushWallHit(w, player, dir);
         if (wallHit != null) {
@@ -716,16 +724,28 @@ public class StrengthPower implements PowerInterface {
             player.hasImpulse = true;
         }
 
-        if (w.random.nextFloat() < 0.60f) {
-            Vec3 front = player.position().add(horiz.normalize().scale(0.8)).add(0.0, 1.0, 0.0);
-            w.sendParticles(
-                    ParticleTypes.CRIT,
-                    front.x, front.y, front.z,
-                    2,
-                    0.08, 0.08, 0.08,
-                    0.0
-            );
+        // SYNC
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
+        // fx
+        Vec3 right = new Vec3(-horiz.z, 0, horiz.x).normalize();
+        Vec3 left = new Vec3(horiz.z, 0, -horiz.x).normalize();
+        Vec3 pCenter = player.position().add(0, 0.1, 0);
+
+        // ground dust
+        if (w.getGameTime() % 2 == 0) {
+            w.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, w.getBlockState(player.blockPosition().below())),
+                    pCenter.x, pCenter.y, pCenter.z, 4, 0.3, 0.1, 0.3, 0.1);
+            w.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.WARDEN_STEP, player.getSoundSource(), 0.5f, 0.8f);
         }
+
+        // the like streaky stuff when fast
+        w.sendParticles(ParticleTypes.CLOUD, pCenter.x + right.x * 0.6, pCenter.y + 1.0, pCenter.z + right.z * 0.6, 1, 0.0, 0.0, 0.0, 0.05);
+        w.sendParticles(ParticleTypes.CLOUD, pCenter.x + left.x * 0.6, pCenter.y + 1.0, pCenter.z + left.z * 0.6, 1, 0.0, 0.0, 0.0, 0.05);
+
+        // crit
+        w.sendParticles(ParticleTypes.CRIT, pCenter.x + horiz.x * 0.8, pCenter.y + 0.8, pCenter.z + horiz.z * 0.8, 3, 0.2, 0.4, 0.2, 0.0);
 
         // ENTITY COLLISION
         boolean canHit = state.rushHitLock <= 0;
@@ -909,18 +929,21 @@ public class StrengthPower implements PowerInterface {
         if (fwd.lengthSqr() < 1.0e-6) return false;
 
         Vec3 feet = player.position().add(0.0, 0.05, 0.0);
-        Vec3 ahead = feet.add(fwd.scale(0.55));
+        Vec3 ahead = feet.add(fwd.scale(0.8));
 
         BlockPos front = BlockPos.containing(ahead);
         BlockPos frontUp = front.above();
 
         BlockState sFront = w.getBlockState(front);
-        boolean frontBlocks = !sFront.getCollisionShape(w, front).isEmpty();
-        if (!frontBlocks) return false;
+        var shape = sFront.getCollisionShape(w, front);
+        if (shape.isEmpty()) return false;
+
+        // Ignore small bumps like snow layers, carpets, and slabs.
+        // Vanilla step-assist smoothly handles these. We only hop over full blocks.
+        if (shape.max(net.minecraft.core.Direction.Axis.Y) <= 0.56) return false;
 
         BlockState sFrontUp = w.getBlockState(frontUp);
-        boolean upBlocks = !sFrontUp.getCollisionShape(w, frontUp).isEmpty();
-        if (upBlocks) return false;
+        if (!sFrontUp.getCollisionShape(w, frontUp).isEmpty()) return false;
 
         if (player.getDeltaMovement().y > 0.30) return false;
 

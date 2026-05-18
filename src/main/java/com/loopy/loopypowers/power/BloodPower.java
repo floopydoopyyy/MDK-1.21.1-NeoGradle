@@ -713,6 +713,16 @@ public class BloodPower implements PowerInterface {
         w.playSound(null, caster.blockPosition(), SoundEvents.ZOMBIE_ATTACK_IRON_DOOR, caster.getSoundSource(), 0.45f, 0.85f + (intensity * 0.3f));
     }
 
+    // OTHER HELPERS
+
+    public static boolean cleanseBleed(LivingEntity target) {
+        if (ACTIVE_BLEEDS.remove(target.getUUID()) != null) {
+            target.removeEffect(ModEffects.BLEED);
+            return true;
+        }
+        return false;
+    }
+
     /* ============================================================
        COOLDOWNS
        ============================================================ */

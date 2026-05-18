@@ -2,26 +2,36 @@ package com.loopy.loopypowers.power;
 
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
+import com.loopy.loopypowers.manager.PowerManager;
 import com.loopy.loopypowers.network.CameraShake;
+import com.loopy.loopypowers.ui.CooldownUI;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.RelativeMovement;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.BlockPos;
 import com.loopy.loopypowers.sound.ModSounds;
 import org.joml.Vector3f;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 // HANDLES ALL ATTRIBUTES OF SPEED POWER
@@ -36,8 +46,23 @@ public class SpeedPower implements PowerInterface {
 
     private static class SpeedState {
         int burstCdTicks = 0;
-        int rushTicks = 0;
-        int rushLoopCd = 0;
+
+        // Primary Dash
+        int dashCharges = DASH_MAX_CHARGES;
+        int dashRechargeTicks = 0;
+        int dashLockTicks = 0;
+        int dashActiveTicks = 0;
+        Vec3 dashDir = Vec3.ZERO;
+
+        // Secondary Pinball Strike
+        boolean isPinballing = false;
+        int pinballHitsLeft = 0;
+        int pinballTicksLeft = 0;
+        Vec3 pinballAnchor = null;
+        final Set<UUID> pinballHitTargets = new HashSet<>();
+        UUID pinballCurrentTarget = null;
+
+        // Ultimate Overdrive
         int overdriveTicks = 0;
         int overdriveLoopCd = 0;
         int overdriveSlowTicks = 0;
@@ -48,7 +73,6 @@ public class SpeedPower implements PowerInterface {
         return ACTIVE_STATES.computeIfAbsent(player.getUUID(), k -> new SpeedState());
     }
 
-    // NEW HELPER GETTER FOR MIXINS
     public static boolean isOverdriveActive(ServerPlayer player) {
         SpeedState state = ACTIVE_STATES.get(player.getUUID());
         return state != null && state.overdriveTicks > 0;
@@ -66,26 +90,26 @@ public class SpeedPower implements PowerInterface {
     private static final int    PASSIVE_BURST_COOLDOWN_TICKS = 500;    // 10 second cooldown
 
     // PRIMARY
-    private static final double DASH_HORIZONTAL_STRENGTH    = 2.6;
-    private static final double DASH_VERTICAL_STRENGTH      = 1.3;
-    private static final double DASH_MAX_DOWN               = -0.8;
-    private static final double DASH_MAX_UP                 = 0.8;
-    private static final double DASH_GROUND_MIN_Y           = 0.18;
-    private static final int    DASH_PARTICLE_COUNT         = 12;
+    private static final int    DASH_MAX_CHARGES            = 2;
+    private static final int    DASH_RECHARGE_TICKS         = 140;     // 7 seconds per charge
+    private static final int    DASH_LOCK_TICKS             = 8;       // small lock between casts
+    private static final int    DASH_DURATION_TICKS         = 5;
+    private static final double DASH_SPEED                  = 3.2;
+    private static final double DASH_MAX_Y                  = 0.45;
+    private static final float  DASH_DAMAGE                 = 6.5f;    // Collision damage
+    private static final double DASH_KNOCKBACK              = 1.35;
+    private static final double DASH_KNOCKBACK_Y            = 0.35;
 
-    // SECONDARY
-    private static final int    RUSH_DURATION_TICKS         = 100;     // 5 seconds
-    private static final float  RUSH_DAMAGE                 = 12.5f;
-    private static final double RUSH_KNOCKBACK_HORIZONTAL   = 1.4;
-    private static final double RUSH_KNOCKBACK_VERTICAL     = 0.55;
-    private static final double RUSH_KNOCKBACK_SCAN_RADIUS  = 4.5;
-    private static final double RUSH_VELOCITY_BONUS         = 1.5;     // flat horizontal velocity on cast
-    private static final int    RUSH_HASTE_AMPLIFIER        = 0;
+    // SECONDARY - PINBALL STRIKE
+    private static final int    PINBALL_MAX_HITS            = 8;       // Max number of dashes
+    private static final double PINBALL_RADIUS              = 12.0;    // Area of effect around the anchor
+    private static final float  PINBALL_DAMAGE              = 12.5f;   // Damage per hit
+    private static final double PINBALL_KNOCKBACK           = 0.9;     // Knockback per hit
+    private static final double PINBALL_KNOCKBACK_Y         = 0.25;
 
-    // ULT
+    // ULT - OVERDRIVE
     private static final int    OVERDRIVE_DURATION_TICKS    = 200;     // 10 seconds
     private static final double OVERDRIVE_MIN_SPEED         = 1.4;
-    private static final double OVERDRIVE_FORWARD_PUSH      = 0.38;
     private static final double OVERDRIVE_ENTITY_DAMAGE     = 19.5f;
     private static final double OVERDRIVE_ENTITY_KNOCKBACK  = 1.8;
     private static final double OVERDRIVE_ENTITY_KNOCKBACK_Y = 0.5;
@@ -101,10 +125,9 @@ public class SpeedPower implements PowerInterface {
     private static final int    A_TRAIN_CHANCE   = 250;
 
     // sound
-    private static final int RUSH_LOOP_INTERVAL_TICKS      = 25;
-    private static final int OVERDRIVE_LOOP_INTERVAL_TICKS      = 18;
+    private static final int OVERDRIVE_LOOP_INTERVAL_TICKS = 18;
 
-    // particles (Refactored to White)
+    // particles
     private static final DustParticleOptions WHITE_BRIGHT  =
             new DustParticleOptions(new Vector3f(1.00f, 1.00f, 1.00f), 1.3f);
     private static final DustParticleOptions WHITE_PALE    =
@@ -121,7 +144,6 @@ public class SpeedPower implements PowerInterface {
         player.getTags().removeIf(tag -> tag.startsWith("speed_") || tag.startsWith("overdrive_"));
         ACTIVE_STATES.put(player.getUUID(), new SpeedState());
 
-        // passive
         player.addEffect(
                 new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 40, PASSIVE_SPEED_AMPLIFIER, true, false)
         );
@@ -132,7 +154,6 @@ public class SpeedPower implements PowerInterface {
         player.getTags().removeIf(tag -> tag.startsWith("speed_") || tag.startsWith("overdrive_"));
         ACTIVE_STATES.remove(player.getUUID());
 
-        // Strip lingering buffs
         player.removeEffect(MobEffects.MOVEMENT_SPEED);
         player.removeEffect(MobEffects.DIG_SPEED);
         player.removeEffect(MobEffects.JUMP);
@@ -154,28 +175,39 @@ public class SpeedPower implements PowerInterface {
         if (state.burstCdTicks > 0) state.burstCdTicks--;
         if (state.blockDmgCd > 0) state.blockDmgCd--;
         if (state.overdriveSlowTicks > 0) state.overdriveSlowTicks--;
-        if (state.rushLoopCd > 0) state.rushLoopCd--;
         if (state.overdriveLoopCd > 0) state.overdriveLoopCd--;
 
         tickPassiveSpeed(player);
         tickLowHealthBurst(player, state);
 
-        if (state.rushTicks > 0) {
-            state.rushTicks--;
-            tickRushEffects(player);
+        // --- DASH TICKING ---
+        if (state.dashLockTicks > 0) state.dashLockTicks--;
+        tickDashRecharge(player, state);
+        updateDashCooldownUI(player, state);
 
-            // Loop sound
-            if (state.rushLoopCd <= 0) {
-                player.serverLevel().playSound(null, player.getX(), player.getY(), player.getZ(), ModSounds.RUSHLOOP.get(), player.getSoundSource(), 0.55f, 1.0f);
-                state.rushLoopCd = RUSH_LOOP_INTERVAL_TICKS;
+        if (state.dashActiveTicks > 0 && !state.isPinballing) {
+            state.dashActiveTicks--;
+            tickDashSurge(player, state);
+
+            if (state.dashActiveTicks == 0) {
+                Vec3 vel = player.getDeltaMovement();
+                player.setDeltaMovement(vel.x * 0.15, Math.min(vel.y, 0.0), vel.z * 0.15);
+                player.hasImpulse = true;
+                player.hurtMarked = true;
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
             }
         }
 
-        if (state.overdriveTicks > 0) {
+        // --- PINBALL TICKING ---
+        if (state.isPinballing) {
+            tickPinballStrike(player, state);
+        }
+
+        // --- OVERDRIVE TICKING ---
+        if (state.overdriveTicks > 0 && !state.isPinballing) {
             state.overdriveTicks--;
             tickOverdrive(player, state);
 
-            // Ultimate Loop Sound
             if (state.overdriveLoopCd <= 0) {
                 player.serverLevel().playSound(null, player.getX(), player.getY(), player.getZ(), ModSounds.RUSHLOOP.get(), player.getSoundSource(), 0.55f, 1.3f);
                 state.overdriveLoopCd = OVERDRIVE_LOOP_INTERVAL_TICKS;
@@ -184,102 +216,272 @@ public class SpeedPower implements PowerInterface {
     }
 
     /* ============================================================
-       PRIMARY — DASH
+       PRIMARY — DASH SURGE
        ============================================================ */
 
     @Override
     public void activatePrimary(ServerPlayer player) {
-        Vec3 look = player.getViewVector(1.0F);
+        SpeedState state = getState(player);
 
-        double y = Mth.clamp(
-                look.y * DASH_VERTICAL_STRENGTH,
-                DASH_MAX_DOWN,
-                DASH_MAX_UP
-        );
-        double x = look.x * DASH_HORIZONTAL_STRENGTH;
-        double z = look.z * DASH_HORIZONTAL_STRENGTH;
+        if (state.isPinballing) return; // Lockout
+        if (state.dashLockTicks > 0) return;
+        if (state.dashCharges <= 0) return;
 
-        if (player.onGround()) {
-            y = Math.max(y, DASH_GROUND_MIN_Y);
+        state.dashCharges--;
+        state.dashLockTicks = DASH_LOCK_TICKS;
+        if (state.dashRechargeTicks <= 0) {
+            state.dashRechargeTicks = PowerManager.getModifiedCooldownTicks(player, DASH_RECHARGE_TICKS);
         }
 
-        player.setDeltaMovement(player.getDeltaMovement().add(x, y, z));
+        state.dashActiveTicks = DASH_DURATION_TICKS;
+        Vec3 look = player.getViewVector(1.0F);
+
+        double y = look.y * DASH_SPEED;
+        if (player.onGround()) {
+            if (y > 0) y *= 0.3;
+            if (y < 0.2) y = 0.2;
+        }
+        y = Math.min(y, DASH_MAX_Y);
+
+        state.dashDir = new Vec3(look.x * DASH_SPEED, y, look.z * DASH_SPEED);
+
+        player.setDeltaMovement(state.dashDir);
         player.hasImpulse = true;
 
-        spawnDashParticles(player, look);
+        spawnDashCastParticles(player, look);
 
-        player.serverLevel().playSound(
-                null,
-                player.getX(), player.getY(), player.getZ(),
-                ModSounds.DASH.get(),
-                player.getSoundSource(),
-                1.0f, 1.0f
+        player.serverLevel().playSound(null, player.getX(), player.getY(), player.getZ(), ModSounds.DASH.get(), player.getSoundSource(), 1.0f, 1.0f);
+    }
+
+    private void tickDashRecharge(ServerPlayer player, SpeedState state) {
+        if (PowerManager.areCooldownsDisabled()) {
+            state.dashCharges = DASH_MAX_CHARGES;
+            state.dashRechargeTicks = 0;
+            return;
+        }
+
+        if (state.dashCharges >= DASH_MAX_CHARGES) {
+            state.dashRechargeTicks = 0;
+            return;
+        }
+
+        int maxTicks = PowerManager.getModifiedCooldownTicks(player, DASH_RECHARGE_TICKS);
+
+        if (state.dashRechargeTicks <= 0) {
+            state.dashRechargeTicks = maxTicks;
+        }
+
+        state.dashRechargeTicks--;
+
+        if (state.dashRechargeTicks <= 0) {
+            state.dashCharges++;
+            if (state.dashCharges < DASH_MAX_CHARGES) {
+                state.dashRechargeTicks = maxTicks;
+            } else {
+                state.dashRechargeTicks = 0;
+            }
+        }
+    }
+
+    private void updateDashCooldownUI(ServerPlayer player, SpeedState state) {
+        String key = "SpeedUI:PRIMARY";
+
+        if (state.dashCharges >= DASH_MAX_CHARGES || PowerManager.areCooldownsDisabled()) {
+            CooldownUI.clearCooldown(player, key);
+            return;
+        }
+
+        int maxTicks = PowerManager.getModifiedCooldownTicks(player, DASH_RECHARGE_TICKS);
+        long endMs = System.currentTimeMillis() + (state.dashRechargeTicks * 50L);
+
+        Component suffix = CooldownUI.makeChargeSuffix(
+                state.dashCharges, DASH_MAX_CHARGES, state.dashRechargeTicks, Math.max(1, maxTicks)
         );
-        player.serverLevel().playSound(null, player.blockPosition(), SoundEvents.PLAYER_ATTACK_SWEEP, player.getSoundSource(), 1.0f, 1.2f);
+
+        CooldownUI.setCooldownEnd(player, key, endMs, suffix);
+    }
+
+    private void tickDashSurge(ServerPlayer player, SpeedState state) {
+        player.setDeltaMovement(state.dashDir);
+        player.hasImpulse = true;
+        player.fallDistance = 0;
+
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
+        player.serverLevel()
+                .getEntities(player, player.getBoundingBox().inflate(1.2), e -> e instanceof LivingEntity && e.isAlive())
+                .forEach(e -> {
+                    LivingEntity victim = (LivingEntity) e;
+
+                    if (victim.hurt(player.damageSources().playerAttack(player), DASH_DAMAGE)) {
+                        Vec3 pushDir = state.dashDir.normalize();
+                        victim.setDeltaMovement(victim.getDeltaMovement().add(
+                                pushDir.x * DASH_KNOCKBACK,
+                                DASH_KNOCKBACK_Y,
+                                pushDir.z * DASH_KNOCKBACK
+                        ));
+                        victim.hasImpulse = true;
+
+                        if (victim instanceof ServerPlayer sp) {
+                            sp.hurtMarked = true;
+                            sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
+                        }
+
+                        player.serverLevel().playSound(null, victim.blockPosition(), SoundEvents.PLAYER_ATTACK_KNOCKBACK, player.getSoundSource(), 1.0f, 1.3f);
+                        CameraShake.shakeNearby(player, 6.0, 5, 0.25f);
+                    }
+                });
+
+        spawnDashTrailParticles(player);
     }
 
     /* ============================================================
-       SECONDARY — RUSH
+       SECONDARY — PINBALL STRIKE (Physical State Machine)
        ============================================================ */
 
     @Override
     public void activateSecondary(ServerPlayer player) {
         SpeedState state = getState(player);
-        state.rushTicks = RUSH_DURATION_TICKS;
-        state.rushLoopCd = 0;
 
-        Vec3 look = player.getViewVector(1.0F);
-        player.setDeltaMovement(
-                look.x * RUSH_VELOCITY_BONUS,
-                player.getDeltaMovement().y,
-                look.z * RUSH_VELOCITY_BONUS
-        );
-        player.hasImpulse = true;
+        if (state.isPinballing) return; // Prevent overlapping
 
-        player.addEffect(
-                new MobEffectInstance(MobEffects.DIG_SPEED, RUSH_DURATION_TICKS, RUSH_HASTE_AMPLIFIER, true, false)
-        );
+        // Initialize State Machine
+        state.isPinballing = true;
+        state.pinballHitsLeft = PINBALL_MAX_HITS;
+        state.pinballCurrentTarget = null;
+        state.pinballAnchor = player.position();
+        state.pinballHitTargets.clear();
 
-        // Pushback + damage
-        player.serverLevel()
-                .getEntities(player, player.getBoundingBox().inflate(RUSH_KNOCKBACK_SCAN_RADIUS),
-                        e -> e instanceof LivingEntity && e.isAlive())
-                .forEach(e -> {
-                    LivingEntity victim = (LivingEntity) e;
+        player.serverLevel().playSound(null, player.blockPosition(), ModSounds.RUSHSTART.get(), player.getSoundSource(), 0.2f, 1.5f);
+    }
 
-                    DamageSource rushSrc = ModDamageTypes.rush(player.level(), player);
+    private void tickPinballStrike(ServerPlayer player, SpeedState state) {
+        ServerLevel w = player.serverLevel();
 
-                    if (victim.hurt(rushSrc, RUSH_DAMAGE)) {
-                        double dx = victim.getX() - player.getX();
-                        double dz = victim.getZ() - player.getZ();
-                        double dist = Math.sqrt(dx * dx + dz * dz);
+        // anchor
+        if (w.getGameTime() % 3 == 0) {
+            for(int i = 0; i < 36; i++) {
+                double angle = i * Math.PI * 2 / 36;
+                w.sendParticles(WHITE_STREAK,
+                        state.pinballAnchor.x + Math.cos(angle) * PINBALL_RADIUS,
+                        state.pinballAnchor.y + 0.1,
+                        state.pinballAnchor.z + Math.sin(angle) * PINBALL_RADIUS,
+                        1, 0, 0, 0, 0);
+            }
+        }
 
-                        if (dist > 0.001) {
-                            victim.setDeltaMovement(victim.getDeltaMovement().add(
-                                    (dx / dist) * RUSH_KNOCKBACK_HORIZONTAL,
-                                    RUSH_KNOCKBACK_VERTICAL,
-                                    (dz / dist) * RUSH_KNOCKBACK_HORIZONTAL
-                            ));
-                            victim.hasImpulse = true;
+        // Negate fall damage
+        player.fallDistance = 0;
+
+        if (state.pinballCurrentTarget == null) {
+            // Scan for alive entities within the anchor radius, requiring strictly explicit Line of Sight
+            List<LivingEntity> allTargets = w.getEntitiesOfClass(LivingEntity.class,
+                    player.getBoundingBox().inflate(PINBALL_RADIUS).move(state.pinballAnchor.subtract(player.position())),
+                    e -> e.isAlive() && e != player
+                            && e.position().distanceToSqr(state.pinballAnchor) <= (PINBALL_RADIUS * PINBALL_RADIUS)
+                            && player.hasLineOfSight(e));
+
+            if (allTargets.isEmpty() || state.pinballHitsLeft <= 0) {
+                endPinballStrike(player, state);
+                return;
+            }
+
+            List<LivingEntity> unhitTargets = allTargets.stream()
+                    .filter(e -> !state.pinballHitTargets.contains(e.getUUID()))
+                    .toList();
+
+            LivingEntity target;
+            if (!unhitTargets.isEmpty()) {
+                target = unhitTargets.get(w.random.nextInt(unhitTargets.size()));
+            } else {
+                // break after same entity hit twice
+                target = allTargets.get(w.random.nextInt(allTargets.size()));
+                state.pinballHitsLeft = 1;
+            }
+
+            state.pinballHitsLeft--;
+            state.pinballHitTargets.add(target.getUUID());
+            state.pinballCurrentTarget = target.getUUID();
+
+            forceLookAt(player, target.getEyePosition());
+
+            // Calculate Launch Velocity
+            Vec3 targetCenter = target.position().add(0, target.getBbHeight() / 2.0, 0);
+            Vec3 playerCenter = player.position().add(0, player.getBbHeight() / 2.0, 0);
+            Vec3 dir = targetCenter.subtract(playerCenter);
+            double dist = dir.length();
+
+            // Cap the physical speed to ensure we don't clip through thick walls instantly
+            double speed = Math.max(2.5, Math.min(dist / 2.0, 5.0));
+            Vec3 dashVel = dir.normalize().scale(speed);
+
+            player.setDeltaMovement(dashVel);
+            player.hasImpulse = true;
+            player.hurtMarked = true;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
+            w.playSound(null, player.blockPosition(), ModSounds.DARKNESSTELEPORT2.get(), player.getSoundSource(), 1.0f, 1.2f);
+            spawnDashCastParticles(player, dir.normalize());
+
+            // Dynamically set travel timeout based on distance and speed (Max ~10 ticks)
+            state.pinballTicksLeft = Math.min(10, (int) Math.ceil(dist / speed) + 1);
+
+        } else {
+            // travel and hit
+            state.pinballTicksLeft--;
+
+            // Maintain some vertical float so they don't drop
+            Vec3 vel = player.getDeltaMovement();
+            if (vel.y < 0 && !player.onGround()) {
+                player.setDeltaMovement(vel.x, vel.y * 0.4, vel.z);
+                player.hasImpulse = true;
+            }
+
+            spawnDashTrailParticles(player);
+
+            Entity targetEnt = w.getEntity(state.pinballCurrentTarget);
+
+            // If target is dead/gone, or we reached max ticks, or we are physically close enough do the hit
+            boolean close = targetEnt != null && player.distanceToSqr(targetEnt) < 16.0;
+
+            if (state.pinballTicksLeft <= 0 || close) {
+
+                if (targetEnt instanceof LivingEntity target && target.isAlive() && close) {
+                    player.swing(InteractionHand.MAIN_HAND, true);
+
+                    if (target.hurt(ModDamageTypes.rush(w, player), PINBALL_DAMAGE)) {
+                        Vec3 push = target.position().subtract(player.position()).normalize();
+                        target.setDeltaMovement(push.x * PINBALL_KNOCKBACK, PINBALL_KNOCKBACK_Y, push.z * PINBALL_KNOCKBACK);
+                        target.hasImpulse = true;
+
+                        if (target instanceof ServerPlayer sp) {
+                            sp.hurtMarked = true;
+                            sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                         }
 
-                        CameraShake.shakeNearby(player, 8.0, 5, 0.45f);
+                        CameraShake.shakeNearby(player, 6.0, 5, 0.4f);
                     }
-                });
 
-        spawnRushCastParticles(player);
+                    w.playSound(null, target.blockPosition(), SoundEvents.PLAYER_ATTACK_SWEEP, player.getSoundSource(), 1.0f, 1.4f);
+                    w.playSound(null, target.blockPosition(), SoundEvents.PLAYER_ATTACK_CRIT, player.getSoundSource(), 0.8f, 1.1f);
+                }
 
-        // sounds
-        player.serverLevel().playSound(
-                null, player.getX(), player.getY(), player.getZ(),
-                SoundEvents.GENERIC_EXPLODE.value(),
-                player.getSoundSource(), 0.3f, 1.2f
-        );
-        player.serverLevel().playSound(
-                null, player.getX(), player.getY(), player.getZ(),
-                ModSounds.RUSHSTART.get(),
-                player.getSoundSource(), 0.5f, 1.0f
-        );
+                // Stop at the target
+                player.setDeltaMovement(0, 0, 0);
+                player.hasImpulse = true;
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
+
+                // Clear target so the next tick instantly begins the finding/launching phase
+                state.pinballCurrentTarget = null;
+            }
+        }
+    }
+
+    private void endPinballStrike(ServerPlayer player, SpeedState state) {
+        state.isPinballing = false;
+        state.pinballHitTargets.clear();
+        player.serverLevel().playSound(null, player.blockPosition(), SoundEvents.PLAYER_ATTACK_CRIT, player.getSoundSource(), 1.0f, 0.8f);
     }
 
     /* ============================================================
@@ -289,16 +491,29 @@ public class SpeedPower implements PowerInterface {
     @Override
     public void activateUltimate(ServerPlayer player) {
         SpeedState state = getState(player);
+
+        if (state.isPinballing) return; // Lockout
+
         state.overdriveTicks = OVERDRIVE_DURATION_TICKS;
         state.overdriveLoopCd = 0;
 
+        // Ensure we always have a valid flat directional vector even if looking straight up/down
         Vec3 look = player.getViewVector(1.0F);
+        Vec3 flatLook = new Vec3(look.x, 0, look.z);
+        if (flatLook.lengthSqr() < 1.0e-6) {
+            flatLook = Vec3.directionFromRotation(0, player.getYRot());
+            flatLook = new Vec3(flatLook.x, 0, flatLook.z);
+        }
+        flatLook = flatLook.normalize();
+
         player.setDeltaMovement(
-                look.x * (OVERDRIVE_MIN_SPEED * 1.8),
+                flatLook.x * (OVERDRIVE_MIN_SPEED * 1.8),
                 player.getDeltaMovement().y + 0.2,
-                look.z * (OVERDRIVE_MIN_SPEED * 1.8)
+                flatLook.z * (OVERDRIVE_MIN_SPEED * 1.8)
         );
         player.hasImpulse = true;
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
         spawnOverdriveCastParticles(player);
 
@@ -349,22 +564,6 @@ public class SpeedPower implements PowerInterface {
             );
             player.serverLevel().playSound(null, player.blockPosition(), SoundEvents.PLAYER_ATTACK_SWEEP, player.getSoundSource(), 0.7f, 1.6f);
         }
-    }
-
-    private void tickRushEffects(ServerPlayer player) {
-        Vec3 vel   = player.getDeltaMovement();
-        Vec3 horiz = new Vec3(vel.x, 0, vel.z);
-        if (horiz.length() < RUSH_VELOCITY_BONUS * 0.6) {
-            Vec3 look = player.getViewVector(1.0F);
-            player.setDeltaMovement(player.getDeltaMovement().add(look.x * 0.18, 0, look.z * 0.18));
-            player.hasImpulse = true;
-        }
-
-        player.serverLevel().sendParticles(
-                ParticleTypes.CLOUD,
-                player.getX(), player.getY() + 0.05, player.getZ(),
-                3, 0.15, 0.05, 0.15, 0.005
-        );
     }
 
     private static void tickOverdrive(ServerPlayer player, SpeedState state) {
@@ -428,13 +627,17 @@ public class SpeedPower implements PowerInterface {
                     }
                 });
         spawnOverdriveTrailParticles(player);
+
+        // AUTHORITATIVE SYNC: Ensures the NeoForge client cannot use WASD to fight the forced forward velocity
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
     }
 
     /* ============================================================
        PARTICLE HELPERS
        ============================================================ */
 
-    private static void spawnDashParticles(ServerPlayer player, Vec3 look) {
+    private static void spawnDashCastParticles(ServerPlayer player, Vec3 look) {
         ServerLevel world = player.serverLevel();
         double ox = player.getX();
         double oy = player.getY() + 0.8;
@@ -442,7 +645,7 @@ public class SpeedPower implements PowerInterface {
 
         world.sendParticles(
                 WHITE_BRIGHT, ox, oy, oz,
-                DASH_PARTICLE_COUNT, 0.3, 0.25, 0.3, 0.06
+                12, 0.3, 0.25, 0.3, 0.06
         );
 
         for (int i = 1; i <= 4; i++) {
@@ -471,40 +674,46 @@ public class SpeedPower implements PowerInterface {
         );
     }
 
-    private static void spawnRushCastParticles(ServerPlayer player) {
+    private static void spawnDashTrailParticles(ServerPlayer player) {
         ServerLevel world = player.serverLevel();
-        double ox = player.getX();
-        double oy = player.getY() + 1.0;
-        double oz = player.getZ();
+        Vec3 vel = player.getDeltaMovement();
+        if (vel.lengthSqr() < 0.1) return;
+        Vec3 back = vel.normalize().scale(-1);
 
-        int ringPoints = 12;
-        for (int i = 0; i < ringPoints; i++) {
-            double angle = i * Math.PI * 2.0 / ringPoints;
-            double speed = 0.22;
+        world.sendParticles(
+                WHITE_PALE,
+                player.getX() + back.x * 0.5,
+                player.getY() + 0.8 + back.y * 0.5,
+                player.getZ() + back.z * 0.5,
+                6, 0.3, 0.4, 0.3, 0.02
+        );
+
+        for (int i = 0; i < 5; i++) {
+            double ox = (world.random.nextDouble() - 0.5) * 1.5;
+            double oy = (world.random.nextDouble() - 0.5) * 1.5;
+            double oz = (world.random.nextDouble() - 0.5) * 1.5;
             world.sendParticles(
-                    WHITE_BRIGHT,
-                    ox + Math.cos(angle) * 0.5, player.getY() + 0.1, oz + Math.sin(angle) * 0.5,
-                    1, Math.cos(angle) * speed, 0.01, Math.sin(angle) * speed, 0.0
+                    WHITE_STREAK,
+                    player.getX() + ox,
+                    player.getY() + 0.8 + oy,
+                    player.getZ() + oz,
+                    0,
+                    back.x * 0.6,
+                    back.y * 0.6,
+                    back.z * 0.6,
+                    1.0
             );
         }
 
-        world.sendParticles(
-                WHITE_BRIGHT, ox, oy, oz,
-                10, 0.5, 0.5, 0.5, 0.10
-        );
-        world.sendParticles(
-                WHITE_PALE, ox, oy, oz,
-                6, 0.6, 0.6, 0.6, 0.08
-        );
-
-        world.sendParticles(
-                ParticleTypes.EXPLOSION_EMITTER,
-                ox, oy, oz, 3, 0.6, 0.2, 0.6, 0.1
-        );
-        world.sendParticles(
-                ParticleTypes.SWEEP_ATTACK,
-                ox, player.getY() + 0.5, oz, 4, 0.6, 0.25, 0.6, 0
-        );
+        if (world.getGameTime() % 2 == 0) {
+            world.sendParticles(
+                    ParticleTypes.SWEEP_ATTACK,
+                    player.getX() + back.x,
+                    player.getY() + 0.5,
+                    player.getZ() + back.z,
+                    1, 0.2, 0.2, 0.2, 0
+            );
+        }
     }
 
     private static void spawnOverdriveCastParticles(ServerPlayer player) {
@@ -608,8 +817,28 @@ public class SpeedPower implements PowerInterface {
     }
 
     /* ============================================================
-       OVERDRIVE BEHAVIOUR HELPERS
+       BEHAVIOUR HELPERS
        ============================================================ */
+
+    private static void forceLookAt(ServerPlayer player, Vec3 targetPos) {
+        Vec3 dir = targetPos.subtract(player.getEyePosition());
+        if (dir.lengthSqr() < 0.0001) return;
+
+        float  targetYaw   = (float)(Math.toDegrees(Mth.atan2(dir.z, dir.x))) - 90f;
+        double horizontal  = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+        float  targetPitch = (float)(-Math.toDegrees(Mth.atan2(dir.y, horizontal)));
+
+        float yawDiff   = Mth.wrapDegrees(targetYaw - player.getYRot());
+        float pitchDiff = targetPitch - player.getXRot();
+
+        player.connection.send(new ClientboundPlayerPositionPacket(
+                0, 0, 0,
+                yawDiff,
+                pitchDiff,
+                java.util.EnumSet.of(RelativeMovement.X, RelativeMovement.Y, RelativeMovement.Z, RelativeMovement.Y_ROT, RelativeMovement.X_ROT),
+                0
+        ));
+    }
 
     private static void applyCollisionSlow(ServerPlayer player, SpeedState state) {
         Vec3 vel = player.getDeltaMovement();
@@ -632,7 +861,7 @@ public class SpeedPower implements PowerInterface {
                 player.getSoundSource(), 0.8f, 0.7f
         );
 
-        CameraShake.shakeNearby(player, 10.0, 5, 15); // Adjust distance if needed
+        CameraShake.shakeNearby(player, 10.0, 5, 15);
     }
 
     private static void applyCollisionSlowBlock(ServerPlayer player, SpeedState state) {
@@ -656,7 +885,7 @@ public class SpeedPower implements PowerInterface {
                 player.getSoundSource(), 0.8f, 0.7f
         );
 
-        CameraShake.shakeNearby(player, 10.0, 6, 17); // Adjust distance if needed
+        CameraShake.shakeNearby(player, 10.0, 6, 17);
     }
 
     private static void breakBlocks(ServerPlayer player, SpeedState state) {
@@ -726,21 +955,23 @@ public class SpeedPower implements PowerInterface {
     }
 
     private static void forceForward(ServerPlayer player, SpeedState state) {
-        Vec3 look   = player.getViewVector(1.0F);
-        Vec3 vel    = player.getDeltaMovement();
-        Vec3 horiz  = new Vec3(vel.x, 0, vel.z);
+        Vec3 look = player.getViewVector(1.0F);
+        Vec3 currentVel = player.getDeltaMovement();
 
-        if (horiz.length() >= OVERDRIVE_MIN_SPEED) return;
+        Vec3 flatLook = new Vec3(look.x, 0, look.z);
+        if (flatLook.lengthSqr() < 1.0e-6) {
+            flatLook = Vec3.directionFromRotation(0, player.getYRot());
+            flatLook = new Vec3(flatLook.x, 0, flatLook.z);
+        }
 
         double slowFactor = (state.overdriveSlowTicks > 0)
                 ? Mth.clamp(state.overdriveSlowTicks / 15.0, 0.15, 1.0)
                 : 1.0;
 
-        Vec3 push = new Vec3(look.x, 0, look.z)
-                .normalize()
-                .scale(OVERDRIVE_FORWARD_PUSH * slowFactor);
+        Vec3 targetHoriz = flatLook.normalize().scale(OVERDRIVE_MIN_SPEED * slowFactor);
 
-        player.setDeltaMovement(player.getDeltaMovement().add(push.x, 0, push.z));
+        // Completely overriding the current X/Z with the newly calculated forward momentum
+        player.setDeltaMovement(targetHoriz.x, currentVel.y, targetHoriz.z);
         player.hasImpulse = true;
     }
 
@@ -777,7 +1008,7 @@ public class SpeedPower implements PowerInterface {
     public String getPrimaryName() { return Component.translatable("power.loopypowers.speed.primary_name").getString(); }
 
     @Override
-    public long getPrimaryCooldownMs() { return 6_000; }
+    public long getPrimaryCooldownMs() { return 0; } // Controlled completely by charges now
 
     @Override
     public String getPrimaryDescription() {

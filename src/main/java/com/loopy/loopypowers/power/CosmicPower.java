@@ -679,4 +679,27 @@ public class CosmicPower implements PowerInterface {
         }
         return closest;
     }
+
+    // OTHER HELPERS
+
+    public static boolean cleanseFate(LivingEntity target) {
+        boolean cleansed = false;
+        UUID targetId = target.getUUID();
+
+        // Loop through every attacker's active fates and remove this target
+        for (Map<UUID, FateInstance> playerFates : ACTIVE_FATES.values()) {
+            if (playerFates.remove(targetId) != null) {
+                cleansed = true;
+            }
+        }
+
+        if (cleansed) {
+            target.removeEffect(ModEffects.FATE);
+            // Tell clients to immediately stop rendering the cosmic aura
+            PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), 0, 0));
+            return true;
+        }
+
+        return false;
+    }
 }

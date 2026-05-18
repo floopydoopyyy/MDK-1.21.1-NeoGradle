@@ -19,7 +19,7 @@ public abstract class FistMiningSpeedMixin {
     @Unique
     private static final float IRON_PICK_SPEED_MULT = 6.0f; // multiplier for fist
     @Unique
-    private static final float TOOL_SPEED_MULT = 1.8f; // multiplier for all tools
+    private static final float TOOL_SPEED_MULT = 2.0f; // multiplier for all tools
 
     @Inject(
             method = "getDestroySpeed(Lnet/minecraft/world/level/block/state/BlockState;)F",
