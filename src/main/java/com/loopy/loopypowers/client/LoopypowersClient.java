@@ -135,6 +135,43 @@ public class LoopypowersClient {
             registrar.playToClient(IceBeamChargePayload.TYPE, IceBeamChargePayload.STREAM_CODEC, ClientPayloadHandler::handleIceBeamCharge);
             registrar.playToClient(IceBeamFirePayload.TYPE, IceBeamFirePayload.STREAM_CODEC, ClientPayloadHandler::handleIceBeamFire);
             registrar.playToClient(IceBlizzardPayload.TYPE, IceBlizzardPayload.STREAM_CODEC, ClientPayloadHandler::handleIceBlizzard);
+            // psychic
+            registrar.playToClient(PuppetryTickPayload.TYPE, PuppetryTickPayload.CODEC, ClientPayloadHandler::handlePuppetryTick);
+            registrar.playToClient(PuppetryHitPayload.TYPE, PuppetryHitPayload.CODEC, ClientPayloadHandler::handlePuppetryHit);
+            registrar.playToClient(CompelTickPayload.TYPE, CompelTickPayload.CODEC, ClientPayloadHandler::handleCompelTick);
+            registrar.playToClient(CompelHitPayload.TYPE, CompelHitPayload.CODEC, ClientPayloadHandler::handleCompelHit);
+            registrar.playToClient(CompelAuraPayload.TYPE, CompelAuraPayload.CODEC, ClientPayloadHandler::handleCompelAura);
+            registrar.playToClient(SpikeAuraPayload.TYPE, SpikeAuraPayload.CODEC, ClientPayloadHandler::handleSpikeAura);
+            registrar.playToClient(PossessedAuraPayload.TYPE, PossessedAuraPayload.CODEC, ClientPayloadHandler::handlePossessedAura);
+            registrar.playToClient(PsychicSpikeImpactPayload.TYPE, PsychicSpikeImpactPayload.CODEC, ClientPayloadHandler::handleSpikeImpact);
+            registrar.playToClient(PsychicSpikeBeamPayload.TYPE, PsychicSpikeBeamPayload.CODEC, ClientPayloadHandler::handleSpikeBeam);
+            registrar.playToClient(PsychicLeechPayload.TYPE, PsychicLeechPayload.CODEC, ClientPayloadHandler::handleLeech);
+            // lightning
+            registrar.playToClient(LightningClapPayload.TYPE, LightningClapPayload.CODEC, ClientPayloadHandler::handleLightningClap);
+            registrar.playToClient(LightningClapHitPayload.TYPE, LightningClapHitPayload.CODEC, ClientPayloadHandler::handleLightningClapHit);
+            registrar.playToClient(LightningSuperchargeBurstPayload.TYPE, LightningSuperchargeBurstPayload.CODEC, ClientPayloadHandler::handleLightningSuperchargeBurst);
+            registrar.playToClient(LightningSuperchargeAuraPayload.TYPE, LightningSuperchargeAuraPayload.CODEC, ClientPayloadHandler::handleLightningSuperchargeAura);
+            // speed
+            registrar.playToClient(SpeedPinballAnchorPayload.TYPE, SpeedPinballAnchorPayload.CODEC, ClientPayloadHandler::handleSpeedPinballAnchor);
+            registrar.playToClient(SpeedDashCastPayload.TYPE, SpeedDashCastPayload.CODEC, ClientPayloadHandler::handleSpeedDashCast);
+            registrar.playToClient(SpeedDashTrailPayload.TYPE, SpeedDashTrailPayload.CODEC, ClientPayloadHandler::handleSpeedDashTrail);
+            registrar.playToClient(SpeedOverdriveCastPayload.TYPE, SpeedOverdriveCastPayload.CODEC, ClientPayloadHandler::handleSpeedOverdriveCast);
+            registrar.playToClient(SpeedOverdriveTrailPayload.TYPE, SpeedOverdriveTrailPayload.CODEC, ClientPayloadHandler::handleSpeedOverdriveTrail);
+            registrar.playToClient(SpeedLowHealthBurstPayload.TYPE, SpeedLowHealthBurstPayload.CODEC, ClientPayloadHandler::handleSpeedLowHealthBurst);
+            registrar.playToClient(SpeedExplosionFxPayload.TYPE, SpeedExplosionFxPayload.CODEC, ClientPayloadHandler::handleSpeedExplosionFx);
+            // sound
+            registrar.playToClient(SoundBassPullPayload.TYPE, SoundBassPullPayload.STREAM_CODEC, ClientPayloadHandler::handleSoundBassPull);
+            registrar.playToClient(SoundBassBurstPayload.TYPE, SoundBassBurstPayload.STREAM_CODEC, ClientPayloadHandler::handleSoundBassBurst);
+            registrar.playToClient(SoundBassPullAnimatePayload.TYPE, SoundBassPullAnimatePayload.STREAM_CODEC, ClientPayloadHandler::handleSoundBassPullAnimate);
+            registrar.playToClient(SoundBassBlastAnimatePayload.TYPE, SoundBassBlastAnimatePayload.STREAM_CODEC, ClientPayloadHandler::handleSoundBassBlastAnimate);
+            registrar.playToClient(SoundUltimateBeamPayload.TYPE, SoundUltimateBeamPayload.STREAM_CODEC, ClientPayloadHandler::handleSoundUltimateBeam);
+            registrar.playToClient(SoundBassPulsePayload.TYPE, SoundBassPulsePayload.STREAM_CODEC, ClientPayloadHandler::handleSoundBassPulse);
+            // strength
+            registrar.playToClient(StrengthParticlePayload.TYPE, StrengthParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleStrengthParticles);
+            // teleport
+            registrar.playToClient(TeleportParticlePayload.TYPE, TeleportParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleTeleportParticles);
+            // telekinesis
+            registrar.playToClient(TelekinesisParticlePayload.TYPE, TelekinesisParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleTelekinesisParticles);
         }
     }
 

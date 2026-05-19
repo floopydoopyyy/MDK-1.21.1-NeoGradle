@@ -31,6 +31,9 @@ import net.minecraft.tags.BlockTags;
 import org.joml.Vector3f;
 import com.loopy.loopypowers.damage.ModDamageTypes;
 import net.minecraft.world.damagesource.DamageSource;
+import net.neoforged.neoforge.network.PacketDistributor;
+import com.loopy.loopypowers.network.payload.StrengthParticlePayload;
+import net.minecraft.world.level.block.Block;
 
 import java.util.HashMap;
 import java.util.List;
@@ -163,7 +166,7 @@ public class StrengthPower implements PowerInterface {
     public boolean onAttack(ServerPlayer attacker, LivingEntity target, DamageSource source, float amount) {
         if (!PassiveManager.isEnabled(attacker)) return true;
 
-        // GUARD CLAUSE - should've remembered this on release lol
+        // GUARD CLAUSE
         if (amount >= 9999f) return true;
 
         // ONE PUNCH EASTER EGG
@@ -183,23 +186,11 @@ public class StrengthPower implements PowerInterface {
                 }
 
                 Vec3 pos = target.position();
-                w.sendParticles(ParticleTypes.EXPLOSION_EMITTER, pos.x, pos.y + 1.0, pos.z, 2, 0, 0, 0, 0);
-                w.sendParticles(ParticleTypes.FLASH, pos.x, pos.y + 1.0, pos.z, 5, 1.0, 1.0, 1.0, 0);
 
-                for (int i = 0; i < 35; i++) {
-                    double step = i * 3.5;
-                    double px = pos.x + dir.x * step;
-                    double py = pos.y + 1.0 + dir.y * step;
-                    double pz = pos.z + dir.z * step;
-
-                    w.sendParticles(ParticleTypes.CAMPFIRE_COSY_SMOKE, px, py, pz, 5, 0.5, 0.5, 0.5, 0.1);
-                    w.sendParticles(ParticleTypes.CLOUD, px, py, pz, 10, 3.0, 3.0, 3.0, 0.3);
-
-                    if (i % 3 == 0) {
-                        w.sendParticles(ParticleTypes.EXPLOSION_EMITTER, px, py, pz, 1, 0, 0, 0, 0);
-                        w.sendParticles(ParticleTypes.EXPLOSION, px, py, pz, 2, 4.0, 4.0, 4.0, 0);
-                    }
-                }
+                // CLIENT DISPATCH: One Punch Particles
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new StrengthParticlePayload(
+                        StrengthParticlePayload.ONE_PUNCH, pos.x, pos.y, pos.z, dir.x, dir.y, dir.z, 0, false
+                ));
 
                 target.hurt(ModDamageTypes.onePunch(w, attacker), 9999f);
                 return false; // Cancel original punch damage
@@ -221,7 +212,6 @@ public class StrengthPower implements PowerInterface {
         Vec3 dir = horiz.normalize();
 
         double out = 0.95;
-
         double lift = target.onGround() ? 0.18 : 0.08;
         double maxUp = 0.55;
 
@@ -236,13 +226,10 @@ public class StrengthPower implements PowerInterface {
             sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
         }
 
-        w.sendParticles(
-                ParticleTypes.CLOUD,
-                target.getX(), target.getY() + target.getBbHeight() * 0.55, target.getZ(),
-                14,
-                0.18, 0.18, 0.18,
-                0.02
-        );
+        // CLIENT DISPATCH: Rage Target Hit Particles
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new StrengthParticlePayload(
+                StrengthParticlePayload.RAGE_HIT, target.getX(), target.getY() + target.getBbHeight() * 0.55, target.getZ(), 0, 0, 0, 0, false
+        ));
 
         w.playSound(
                 null,
@@ -312,93 +299,11 @@ public class StrengthPower implements PowerInterface {
                 casterGrounded ? 0.85f : 1.10f
         );
 
-        w.sendParticles(ParticleTypes.EXPLOSION_EMITTER,
-                slamPos.x, pos.y + 0.10, slamPos.z,
-                1, 0, 0, 0, 0
-        );
-
-        if (casterGrounded) {
-            w.sendParticles(ParticleTypes.EXPLOSION,
-                    slamPos.x, pos.y + 0.15, slamPos.z,
-                    6,
-                    0.35, 0.15, 0.35,
-                    0.02
-            );
-            w.sendParticles(ParticleTypes.POOF,
-                    slamPos.x, pos.y + 0.10, slamPos.z,
-                    12,
-                    0.55, 0.15, 0.55,
-                    0.03
-            );
-        }
-
-        if (!groundState.isAir()) {
-            int dustCountA = casterGrounded ? 420 : 20;
-            int dustCountB = casterGrounded ? 220 : 8;
-
-            w.sendParticles(
-                    new BlockParticleOption(ParticleTypes.BLOCK, groundState),
-                    slamPos.x, ground.getY() + 1.01, slamPos.z,
-                    dustCountA,
-                    casterGrounded ? 2.2 : 0.5,
-                    casterGrounded ? 0.18 : 0.08,
-                    casterGrounded ? 2.2 : 0.5,
-                    casterGrounded ? 0.75 : 0.08
-            );
-
-            w.sendParticles(
-                    new BlockParticleOption(ParticleTypes.BLOCK, groundState),
-                    slamPos.x, ground.getY() + 1.01, slamPos.z,
-                    dustCountB,
-                    casterGrounded ? 0.65 : 0.20,
-                    casterGrounded ? 1.10 : 0.25,
-                    casterGrounded ? 0.65 : 0.20,
-                    casterGrounded ? 1.15 : 0.12
-            );
-
-            if (casterGrounded) {
-                double[] radii = new double[] { 1.4, 2.8, 4.2 };
-                int[] counts   = new int[]    { 24, 32, 42 };
-                double[] spreads = new double[]{ 0.25, 0.30, 0.38 };
-                double[] speeds  = new double[]{ 0.35, 0.40, 0.45 };
-
-                for (int ri = 0; ri < radii.length; ri++) {
-                    double r = radii[ri];
-                    int n = counts[ri];
-
-                    for (int i = 0; i < n; i++) {
-                        double a = w.random.nextDouble() * (Math.PI * 2.0);
-                        double jr = (w.random.nextDouble() - 0.5) * 0.35;
-
-                        double x = slamPos.x + Math.cos(a) * (r + jr);
-                        double z = slamPos.z + Math.sin(a) * (r + jr);
-
-                        w.sendParticles(
-                                new BlockParticleOption(ParticleTypes.BLOCK, groundState),
-                                x, ground.getY() + 1.01, z,
-                                1,
-                                spreads[ri], 0.08, spreads[ri],
-                                speeds[ri]
-                        );
-                    }
-                }
-
-                w.sendParticles(
-                        ParticleTypes.CLOUD,
-                        slamPos.x, ground.getY() + 1.05, slamPos.z,
-                        140,
-                        1.1, 0.25, 1.1,
-                        0.10
-                );
-                w.sendParticles(
-                        ParticleTypes.CRIT,
-                        slamPos.x, ground.getY() + 1.05, slamPos.z,
-                        55,
-                        0.7, 0.20, 0.7,
-                        0.12
-                );
-            }
-        }
+        // CLIENT DISPATCH: Ground Slam Burst
+        int stateId = Block.getId(groundState);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                StrengthParticlePayload.GROUND_SLAM, slamPos.x, pos.y + 0.10, slamPos.z, 0, 0, 0, stateId, casterGrounded
+        ));
 
         if (casterGrounded) {
             CameraShake.shakeNearby(player, 6.0, 10, 1.05f);
@@ -456,9 +361,10 @@ public class StrengthPower implements PowerInterface {
             }
 
             if (casterGrounded && w.random.nextFloat() < 0.35f) {
-                w.sendParticles(ParticleTypes.CRIT,
-                        t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(),
-                        2, 0.12, 0.12, 0.12, 0.0);
+                // CLIENT DISPATCH: Slam Target Crit
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(t, new StrengthParticlePayload(
+                        StrengthParticlePayload.SLAM_TARGET_CRIT, t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(), 0, 0, 0, 0, false
+                ));
             }
         }
 
@@ -617,7 +523,7 @@ public class StrengthPower implements PowerInterface {
         return !s.isAir();
     }
 
-        /* ============================================================
+    /* ============================================================
        SECONDARY
        ============================================================ */
 
@@ -647,7 +553,6 @@ public class StrengthPower implements PowerInterface {
     }
 
     private static void tickBullrush(ServerPlayer player, StrengthState state) {
-        // If we just ended, revert step-up.
         if (state.rushTicks <= 0) {
             enableRushStepUp(player, false);
             return;
@@ -660,14 +565,16 @@ public class StrengthPower implements PowerInterface {
 
             ServerLevel w = player.serverLevel();
             w.playSound(null, player.getX(), player.getY(), player.getZ(), ModSounds.BULLRUSH.get(), player.getSoundSource(), 0.6f, 0.9f);
-            w.sendParticles(ParticleTypes.CLOUD, player.getX(), player.getY() + 0.2, player.getZ(), 10, 0.25, 0.10, 0.25, 0.02);
+
+            PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                    StrengthParticlePayload.RUSH_CANCEL, player.getX(), player.getY() + 0.2, player.getZ(), 0, 0, 0, 0, false
+            ));
             return;
         }
 
         Vec3 dir = state.rushDir;
         if (dir == null) dir = player.getViewVector(1.0f).normalize();
 
-        // limit steering
         double maxTurn = Math.toRadians(RUSH_MAX_TURN_DEG);
 
         Vec3 look = player.getViewVector(1.0f);
@@ -681,7 +588,7 @@ public class StrengthPower implements PowerInterface {
             double ang = Math.acos(dot);
             if (ang > maxTurn) {
                 Vec3 cross = a.cross(b);
-                double sign = cross.y >= 0 ? -1.0 : 1.0; // Flipped sign to fix inverted steering
+                double sign = cross.y >= 0 ? -1.0 : 1.0;
                 double clampedAng = sign * maxTurn;
                 double cos = Math.cos(clampedAng);
                 double sin = Math.sin(clampedAng);
@@ -699,7 +606,6 @@ public class StrengthPower implements PowerInterface {
         Vec3 horiz = new Vec3(dir.x, 0.0, dir.z);
         if (horiz.lengthSqr() < 1.0e-6) horiz = new Vec3(1, 0, 0);
 
-        // break soft blocks
         BlockPos basePos = player.blockPosition();
         for (BlockPos bPos : BlockPos.betweenClosed(basePos.offset(-1, 0, -1), basePos.offset(1, 1, 1))) {
             BlockState bs = w.getBlockState(bPos);
@@ -728,24 +634,18 @@ public class StrengthPower implements PowerInterface {
         player.hurtMarked = true;
         player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
-        // fx
-        Vec3 right = new Vec3(-horiz.z, 0, horiz.x).normalize();
-        Vec3 left = new Vec3(horiz.z, 0, -horiz.x).normalize();
+        // FX
         Vec3 pCenter = player.position().add(0, 0.1, 0);
+        boolean playStep = w.getGameTime() % 2 == 0;
+        int stateId = Block.getId(w.getBlockState(player.blockPosition().below()));
 
-        // ground dust
-        if (w.getGameTime() % 2 == 0) {
-            w.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, w.getBlockState(player.blockPosition().below())),
-                    pCenter.x, pCenter.y, pCenter.z, 4, 0.3, 0.1, 0.3, 0.1);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                StrengthParticlePayload.RUSH_TICK, pCenter.x, pCenter.y, pCenter.z, horiz.x, horiz.y, horiz.z, stateId, playStep
+        ));
+
+        if (playStep) {
             w.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.WARDEN_STEP, player.getSoundSource(), 0.5f, 0.8f);
         }
-
-        // the like streaky stuff when fast
-        w.sendParticles(ParticleTypes.CLOUD, pCenter.x + right.x * 0.6, pCenter.y + 1.0, pCenter.z + right.z * 0.6, 1, 0.0, 0.0, 0.0, 0.05);
-        w.sendParticles(ParticleTypes.CLOUD, pCenter.x + left.x * 0.6, pCenter.y + 1.0, pCenter.z + left.z * 0.6, 1, 0.0, 0.0, 0.0, 0.05);
-
-        // crit
-        w.sendParticles(ParticleTypes.CRIT, pCenter.x + horiz.x * 0.8, pCenter.y + 0.8, pCenter.z + horiz.z * 0.8, 3, 0.2, 0.4, 0.2, 0.0);
 
         // ENTITY COLLISION
         boolean canHit = state.rushHitLock <= 0;
@@ -773,12 +673,9 @@ public class StrengthPower implements PowerInterface {
                         sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                     }
 
-                    w.sendParticles(ParticleTypes.CRIT,
-                            t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(),
-                            8, 0.16, 0.16, 0.16, 0.02);
-                    w.sendParticles(ParticleTypes.CLOUD,
-                            t.getX(), t.getY() + 0.15, t.getZ(),
-                            14, 0.25, 0.10, 0.25, 0.04);
+                    PacketDistributor.sendToPlayersTrackingEntityAndSelf(t, new StrengthParticlePayload(
+                            StrengthParticlePayload.RUSH_HIT, t.getX(), t.getY() + t.getBbHeight() * 0.55, t.getZ(), 0, 0, 0, 0, false
+                    ));
                 }
 
                 w.playSound(null, player.getX(), player.getY(), player.getZ(),
@@ -841,9 +738,9 @@ public class StrengthPower implements PowerInterface {
                 SoundEvents.GENERIC_EXPLODE.value(),
                 player.getSoundSource(), 0.8f, 0.85f);
 
-        w.sendParticles(ParticleTypes.EXPLOSION_EMITTER,
-                impact.x, impact.y, impact.z,
-                1, 0, 0, 0, 0);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                StrengthParticlePayload.RUSH_CRASH, impact.x, impact.y, impact.z, 0, 0, 0, 0, false
+        ));
 
         int broken = 0;
 
@@ -906,13 +803,6 @@ public class StrengthPower implements PowerInterface {
         }
 
         CameraShake.shakeNearby(player, 8.0, 10, 1.15f);
-
-        w.sendParticles(ParticleTypes.CLOUD,
-                impact.x, impact.y, impact.z,
-                120, 1.0, 0.35, 1.0, 0.12);
-        w.sendParticles(ParticleTypes.CRIT,
-                impact.x, impact.y, impact.z,
-                50, 0.8, 0.25, 0.8, 0.18);
     }
 
     private static void enableRushStepUp(ServerPlayer player, boolean enable) {
@@ -938,8 +828,6 @@ public class StrengthPower implements PowerInterface {
         var shape = sFront.getCollisionShape(w, front);
         if (shape.isEmpty()) return false;
 
-        // Ignore small bumps like snow layers, carpets, and slabs.
-        // Vanilla step-assist smoothly handles these. We only hop over full blocks.
         if (shape.max(net.minecraft.core.Direction.Axis.Y) <= 0.56) return false;
 
         BlockState sFrontUp = w.getBlockState(frontUp);
@@ -1005,14 +893,12 @@ public class StrengthPower implements PowerInterface {
         if (state.rageAuraStep <= 0) {
             state.rageAuraStep = RAGE_AURA_INTERVAL;
 
-            w.sendParticles(
-                    RAGE_RED_DUST,
-                    player.getX(), player.getY() + 0.95, player.getZ(),
-                    1,
-                    0.55, 0.55, 0.55,
-                    0.02
-            );
-        } else {
+                // FX - Client Dispatch (Enhanced Scary Aura handled on client)
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                        StrengthParticlePayload.RAGE_TICK, player.getX(), player.getY(), player.getZ(), 0, 0, 0, 0, false
+                ));
+            }
+        else {
             state.rageAuraStep--;
         }
 
@@ -1040,48 +926,9 @@ public class StrengthPower implements PowerInterface {
         double cy = player.getY() + 1.0;
         double cz = player.getZ();
 
-        w.sendParticles(
-                RAGE_RED_DUST,
-                cx, cy, cz,
-                28,
-                0.12, 0.18, 0.12,
-                0.06
-        );
-
-        int points = 24;
-        double radius = 3.35;
-        double speed = 0.45;
-        double y = player.getY() + 0.15;
-
-        for (int i = 0; i < points; i++) {
-            double a = (Math.PI * 2.0) * (i / (double) points);
-            double dx = Math.cos(a);
-            double dz = Math.sin(a);
-
-            w.sendParticles(
-                    RAGE_RED_DUST,
-                    cx + dx * radius, y, cz + dz * radius,
-                    10,
-                    dx * speed, 0.03, dz * speed,
-                    1.0
-            );
-        }
-
-        w.sendParticles(
-                ParticleTypes.EXPLOSION_EMITTER,
-                cx, player.getY() + 0.35, cz,
-                1,
-                0, 0, 0,
-                0
-        );
-
-        w.sendParticles(
-                ParticleTypes.POOF,
-                cx, player.getY() + 0.10, cz,
-                10,
-                0.35, 0.05, 0.35,
-                0.05
-        );
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                StrengthParticlePayload.RAGE_PULSE, cx, cy, cz, 0, 0, 0, 0, false
+        ));
     }
 
     /* ============================================================

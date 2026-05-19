@@ -18,7 +18,7 @@ public class ModItemGroups {
     // register the tab
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> LOOPYPOWERS_GROUP =
             CREATIVE_MODE_TABS.register("loopypowers_group", () -> CreativeModeTab.builder()
-                    .icon(() -> new ItemStack(ModItems.CELESTIAL_SHARD.get()))
+                    .icon(() -> new ItemStack(ModItems.POWER_VESTIGE.get()))
                     .title(Component.literal("Loopy Powers"))
                     .displayItems((parameters, output) -> {
                         // Items

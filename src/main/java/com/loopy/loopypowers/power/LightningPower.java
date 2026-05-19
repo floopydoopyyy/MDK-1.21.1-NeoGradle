@@ -20,7 +20,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LightningBolt;
 import com.loopy.loopypowers.damage.ModDamageTypes;
-import com.loopy.loopypowers.network.payload.StormCloudPayload;
+import com.loopy.loopypowers.network.payload.*;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.phys.AABB;
@@ -418,11 +418,12 @@ public class LightningPower implements PowerInterface {
 
         if (isParty) {
             world.playSound(null, player.blockPosition(), ModSounds.PARTYPOPPER.get(), player.getSoundSource(), 1.0f, 1.0f);
-            spawnConfetti(world, player);
         } else {
             world.playSound(null, player.blockPosition(), ModSounds.THUNDERCLAP.get(), player.getSoundSource(), 0.7f, 1.4f);
-            spawnClapCone(world, player);
         }
+
+        // Payload for the cone and central burst
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new LightningClapPayload(player.getId(), isParty));
 
         for (LivingEntity target : targets) {
             Vec3 to = target.position().add(0, target.getBbHeight() * 0.5, 0).subtract(origin);
@@ -438,105 +439,8 @@ public class LightningPower implements PowerInterface {
             double t = 1.0 - (dist / CLAP_RANGE);
             target.hurt(ModDamageTypes.thunderclap(player.level(), player), (float) (CLAP_MIN_DAMAGE + t * (CLAP_MAX_DAMAGE - CLAP_MIN_DAMAGE)));
 
-            // Hit feedback
-            if (isParty) {
-                spawnTargetConfetti(world, target, t);
-            } else {
-                world.sendParticles(ParticleTypes.ELECTRIC_SPARK, target.getX(), target.getY() + 1.0, target.getZ(), (int)(8 + 20 * t), 0.4, 0.6, 0.4, 0.06);
-                world.sendParticles(BOLT_YELLOW, target.getX(), target.getY() + 1.0, target.getZ(), (int)(6 + 12 * t), 0.3, 0.4, 0.3, 0.05);
-            }
-        }
-    }
-
-    private void spawnClapCone(ServerLevel world, ServerPlayer player) {
-        Vec3 center  = player.position().add(0, 0.8, 0);   // at torso height
-        Vec3 forward = player.getViewVector(1.0f).normalize();
-
-        // right vector — spreads particles perpendicular to look direction
-        Vec3 right = new Vec3(-forward.z, 0, forward.x).normalize();
-
-        double halfAngle = Math.toRadians(CLAP_ANGLE_DEG * 0.5);
-
-        // 6 depth slices along the forward axis; each slice is wider than the last
-        int   depthSlices = 6;
-        int   arcPoints   = 20;
-
-        for (int d = 1; d <= depthSlices; d++) {
-            double depth    = CLAP_RANGE * ((double) d / depthSlices);
-            double arcWidth = depth * Math.tan(halfAngle);   // cone widens with depth
-            Vec3  slicePos = center.add(forward.scale(depth));
-
-            for (int i = 0; i <= arcPoints; i++) {
-                // lateral offset within the arc width for this slice
-                double lateral = -arcWidth + 2.0 * arcWidth * ((double) i / arcPoints);
-                double jitter  = (RNG.nextDouble() - 0.5) * 0.6;   // break the grid
-
-                double x = slicePos.x + right.x * (lateral + jitter);
-                double z = slicePos.z + right.z * (lateral + jitter);
-                // vertical: very tight — CLAP_VERT_FLAT squashes it
-                double y = slicePos.y + (RNG.nextDouble() - 0.5) * 1.5;
-
-                if (RNG.nextFloat() > 0.65f) continue;   // sparse
-
-                DustParticleOptions col = d <= 2 ? BOLT_WHITE
-                        : d <= 4 ? BOLT_YELLOW
-                        : BOLT_GOLD;
-                world.sendParticles(col, x, y, z, 1, 0, 0, 0, 0);
-
-                if (RNG.nextFloat() < 0.20f) {
-                    world.sendParticles(ParticleTypes.END_ROD,
-                            x, y, z, 1,
-                            forward.x * 0.12, 0.01, forward.z * 0.12, 0.0);
-                }
-            }
-        }
-
-        // small central column of sparks right at the player's hand — origin of the blast
-        world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                center.x, center.y, center.z,
-                18, 0.3, 0.3, 0.3, 0.08);
-        world.sendParticles(BOLT_WHITE,
-                center.x, center.y, center.z,
-                6, 0.15, 0.15, 0.15, 0.05);
-    } // my head hurts
-
-    // EGG
-    private void spawnConfetti(ServerLevel world, ServerPlayer player) {
-        Vec3 center  = player.position().add(0, 0.8, 0);
-        Vec3 forward = player.getViewVector(1.0f).normalize();
-        Vec3 right = new Vec3(-forward.z, 0, forward.x).normalize();
-
-        double halfAngle = Math.toRadians(CLAP_ANGLE_DEG * 0.5);
-        int depthSlices = 6;
-        int arcPoints = 20;
-
-        for (int d = 1; d <= depthSlices; d++) {
-            double depth = CLAP_RANGE * ((double) d / depthSlices);
-            double arcWidth = depth * Math.tan(halfAngle);
-            Vec3 slicePos = center.add(forward.scale(depth));
-
-            for (int i = 0; i <= arcPoints; i++) {
-                double lateral = -arcWidth + 2.0 * arcWidth * ((double) i / arcPoints);
-                double jitter = (RNG.nextDouble() - 0.5) * 0.6;
-
-                double x = slicePos.x + right.x * (lateral + jitter);
-                double z = slicePos.z + right.z * (lateral + jitter);
-                double y = slicePos.y + (RNG.nextDouble() - 0.5) * 1.5;
-
-                if (RNG.nextFloat() > 0.50f) continue;
-
-                // Randomized Rainbow Confetti
-                Vector3f rainbow = new Vector3f(RNG.nextFloat(), RNG.nextFloat(), RNG.nextFloat());
-                world.sendParticles(new DustParticleOptions(rainbow, 1.1f), x, y, z, 1, 0, 0, 0, 0);
-            }
-        }
-    }
-
-    private void spawnTargetConfetti(ServerLevel world, LivingEntity target, double t) {
-        int count = (int)(25 + 30 * t);
-        for (int i = 0; i < count; i++) {
-            Vector3f color = new Vector3f(RNG.nextFloat(), RNG.nextFloat(), RNG.nextFloat());
-            world.sendParticles(new DustParticleOptions(color, 0.85f), target.getX(), target.getY() + 1.0, target.getZ(), 1, 0.3, 0.4, 0.3, 0.03);
+            // Payload for the hit feedback
+            PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new LightningClapHitPayload(target.getId(), (float)t, isParty));
         }
     }
 
@@ -564,76 +468,16 @@ public class LightningPower implements PowerInterface {
     }
 
     private void tickSuperchargeAura(ServerPlayer player, LightningState state) {
-        ServerLevel world = player.serverLevel();
-
         if (state.superchargeTicks % SUPERCHARGE_AURA_INTERVAL != 0) return;
-
-        Vec3 pos = player.position();
-
-        int points = 16;
-        for (int i = 0; i < points; i++) {
-            double angle = i * Math.PI * 2.0 / points + (world.getGameTime() * 0.10);
-            double r     = 0.65;
-            world.sendParticles(BOLT_YELLOW,
-                    pos.x + Math.cos(angle) * r, pos.y + 0.9, pos.z + Math.sin(angle) * r,
-                    1, 0, 0.005, 0, 0.0);
-        }
-
-        if (RNG.nextFloat() < 0.5f) {
-            double angle = RNG.nextDouble() * Math.PI * 2;
-            world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                    pos.x + Math.cos(angle) * 0.65, pos.y + 0.9, pos.z + Math.sin(angle) * 0.65,
-                    2, Math.cos(angle) * 0.10, 0.04, Math.sin(angle) * 0.10, 0.0);
-        }
-
-        if (state.superchargeTicks % (SUPERCHARGE_AURA_INTERVAL * 5) == 0) {
-            double angle = RNG.nextDouble() * Math.PI * 2;
-            world.sendParticles(ParticleTypes.END_ROD,
-                    pos.x + (RNG.nextDouble() - 0.5) * 0.4,
-                    pos.y + 0.6 + RNG.nextDouble() * 1.2,
-                    pos.z + (RNG.nextDouble() - 0.5) * 0.4,
-                    1, Math.cos(angle) * 0.15, 0.06, Math.sin(angle) * 0.15, 0.0);
-        }
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new LightningSuperchargeAuraPayload(player.getId()));
     }
 
     private void spawnSuperchargeBurst(ServerLevel world, ServerPlayer player) {
         Vec3 center = player.position();
 
-        // tight charge ring at the feet
-        spawnChargeRing(world, player);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new LightningSuperchargeBurstPayload(player.getId()));
 
-        // large expanding ring from player
-        int    outerPoints = 32;
-        double outerSpeed  = 0.30;
-        for (int i = 0; i < outerPoints; i++) {
-            double angle = i * Math.PI * 2.0 / outerPoints;
-            DustParticleOptions col = (i % 3 == 0) ? BOLT_WHITE
-                    : (i % 3 == 1) ? BOLT_YELLOW
-                    : BOLT_GOLD;
-            world.sendParticles(col,
-                    center.x + Math.cos(angle) * 0.4, center.y + 0.3, center.z + Math.sin(angle) * 0.4,
-                    1, Math.cos(angle) * outerSpeed, 0.01, Math.sin(angle) * outerSpeed, 0.0);
-        }
-
-        // dense particles on player
-        world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                center.x, center.y + 0.5, center.z, 80, 0.7, 1.2, 0.7, 0.12);
-        world.sendParticles(BOLT_YELLOW,
-                center.x, center.y + 1.0, center.z, 40, 0.5, 1.0, 0.5, 0.09);
-        world.sendParticles(BOLT_WHITE,
-                center.x, center.y + 1.0, center.z, 16, 0.3, 0.8, 0.3, 0.07);
-
-        // fx at player
-        for (int i = 0; i < 8; i++) {
-            double angle = i * Math.PI * 2.0 / 8;
-            world.sendParticles(ParticleTypes.END_ROD,
-                    center.x + Math.cos(angle) * 0.4,
-                    center.y + 0.8 + RNG.nextDouble(),
-                    center.z + Math.sin(angle) * 0.4,
-                    1, Math.cos(angle) * 0.22, 0.04, Math.sin(angle) * 0.22, 0.0);
-        }
-
-        // cosmetic lightning
+        // cosmetic lightning (Needs to stay server side to spawn the actual lightning entity!)
         for (int i = 0; i < 3; i++) {
             Vec3 offset = new Vec3(
                     center.x + (RNG.nextDouble() - 0.5) * 2.5,
@@ -647,21 +491,6 @@ public class LightningPower implements PowerInterface {
         world.playSound(null, player.blockPosition(),
                 SoundEvents.LIGHTNING_BOLT_THUNDER,
                 player.getSoundSource(), 0.9f, 1.5f);
-    }
-
-    private void spawnChargeRing(ServerLevel world, ServerPlayer player) {
-        Vec3 center = player.position();
-        int points = 40;
-
-        for (int i = 0; i < points; i++) {
-            double angle = 2 * Math.PI * i / points;
-            double x = center.x + Math.cos(angle) * 1.2;
-            double z = center.z + Math.sin(angle) * 1.2;
-
-            world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
-                    x, center.y + 0.2, z,
-                    1, 0, 0, 0, 0);
-        }
     }
 
     // ULT

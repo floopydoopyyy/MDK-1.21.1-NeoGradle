@@ -4,9 +4,14 @@ import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
 import com.loopy.loopypowers.manager.PowerManager;
 import com.loopy.loopypowers.network.CameraShake;
+import com.loopy.loopypowers.network.payload.SpeedDashCastPayload;
+import com.loopy.loopypowers.network.payload.SpeedDashTrailPayload;
+import com.loopy.loopypowers.network.payload.SpeedExplosionFxPayload;
+import com.loopy.loopypowers.network.payload.SpeedLowHealthBurstPayload;
+import com.loopy.loopypowers.network.payload.SpeedOverdriveCastPayload;
+import com.loopy.loopypowers.network.payload.SpeedOverdriveTrailPayload;
+import com.loopy.loopypowers.network.payload.SpeedPinballAnchorPayload;
 import com.loopy.loopypowers.ui.CooldownUI;
-import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
@@ -25,7 +30,7 @@ import net.minecraft.world.entity.RelativeMovement;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.BlockPos;
 import com.loopy.loopypowers.sound.ModSounds;
-import org.joml.Vector3f;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -126,14 +131,6 @@ public class SpeedPower implements PowerInterface {
 
     // sound
     private static final int OVERDRIVE_LOOP_INTERVAL_TICKS = 18;
-
-    // particles
-    private static final DustParticleOptions WHITE_BRIGHT  =
-            new DustParticleOptions(new Vector3f(1.00f, 1.00f, 1.00f), 1.3f);
-    private static final DustParticleOptions WHITE_PALE    =
-            new DustParticleOptions(new Vector3f(0.85f, 0.85f, 0.85f), 1.0f);
-    private static final DustParticleOptions WHITE_STREAK =
-            new DustParticleOptions(new Vector3f(0.95f, 0.95f, 0.95f), 0.8f);
 
     /* ============================================================
        PASSIVE
@@ -359,16 +356,13 @@ public class SpeedPower implements PowerInterface {
     private void tickPinballStrike(ServerPlayer player, SpeedState state) {
         ServerLevel w = player.serverLevel();
 
-        // anchor
+        // Anchor boundary ring — gated to every 3 ticks server-side before sending
         if (w.getGameTime() % 3 == 0) {
-            for(int i = 0; i < 36; i++) {
-                double angle = i * Math.PI * 2 / 36;
-                w.sendParticles(WHITE_STREAK,
-                        state.pinballAnchor.x + Math.cos(angle) * PINBALL_RADIUS,
-                        state.pinballAnchor.y + 0.1,
-                        state.pinballAnchor.z + Math.sin(angle) * PINBALL_RADIUS,
-                        1, 0, 0, 0, 0);
-            }
+            SpeedPinballAnchorPayload anchorPayload = new SpeedPinballAnchorPayload(
+                    state.pinballAnchor.x, state.pinballAnchor.y, state.pinballAnchor.z
+            );
+            PacketDistributor.sendToPlayersTrackingEntity(player, anchorPayload);
+            PacketDistributor.sendToPlayer(player, anchorPayload);
         }
 
         // Negate fall damage
@@ -552,16 +546,12 @@ public class SpeedPower implements PowerInterface {
 
             state.burstCdTicks = PASSIVE_BURST_COOLDOWN_TICKS;
 
-            player.serverLevel().sendParticles(
-                    WHITE_BRIGHT,
-                    player.getX(), player.getY() + 0.5, player.getZ(),
-                    8, 0.3, 0.4, 0.3, 0.06
+            SpeedLowHealthBurstPayload p = new SpeedLowHealthBurstPayload(
+                    player.getX(), player.getY(), player.getZ()
             );
-            player.serverLevel().sendParticles(
-                    ParticleTypes.SWEEP_ATTACK,
-                    player.getX(), player.getY() + 0.5, player.getZ(),
-                    3, 0.4, 0.2, 0.4, 0
-            );
+            PacketDistributor.sendToPlayersTrackingEntity(player, p);
+            PacketDistributor.sendToPlayer(player, p);
+
             player.serverLevel().playSound(null, player.blockPosition(), SoundEvents.PLAYER_ATTACK_SWEEP, player.getSoundSource(), 0.7f, 1.6f);
         }
     }
@@ -614,11 +604,13 @@ public class SpeedPower implements PowerInterface {
 
                         applyCollisionSlow(player, state);
 
-                        player.serverLevel().sendParticles(
-                                ParticleTypes.EXPLOSION_EMITTER,
-                                player.getX(), player.getY() + 1, player.getZ(),
-                                4, 0.6, 0.2, 0.6, 0.1
+                        // Heavy explosion FX — entity hit
+                        SpeedExplosionFxPayload p = new SpeedExplosionFxPayload(
+                                player.getX(), player.getY(), player.getZ(), true
                         );
+                        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+                        PacketDistributor.sendToPlayer(player, p);
+
                         player.serverLevel().playSound(
                                 null, player.getX(), player.getY(), player.getZ(),
                                 SoundEvents.GENERIC_EXPLODE.value(),
@@ -626,6 +618,7 @@ public class SpeedPower implements PowerInterface {
                         );
                     }
                 });
+
         spawnOverdriveTrailParticles(player);
 
         // AUTHORITATIVE SYNC: Ensures the NeoForge client cannot use WASD to fight the forced forward velocity
@@ -634,186 +627,50 @@ public class SpeedPower implements PowerInterface {
     }
 
     /* ============================================================
-       PARTICLE HELPERS
+       PARTICLE HELPERS  (now dispatch payloads — no server-side rendering)
        ============================================================ */
 
     private static void spawnDashCastParticles(ServerPlayer player, Vec3 look) {
-        ServerLevel world = player.serverLevel();
-        double ox = player.getX();
-        double oy = player.getY() + 0.8;
-        double oz = player.getZ();
-
-        world.sendParticles(
-                WHITE_BRIGHT, ox, oy, oz,
-                12, 0.3, 0.25, 0.3, 0.06
+        SpeedDashCastPayload p = new SpeedDashCastPayload(
+                player.getX(), player.getY(), player.getZ(),
+                look.x, look.y, look.z
         );
-
-        for (int i = 1; i <= 4; i++) {
-            double d   = i * 0.70;
-            double vel = 0.04 + i * 0.016;
-            world.sendParticles(
-                    (i % 2 == 0) ? WHITE_BRIGHT : WHITE_STREAK,
-                    ox - look.x * d, oy - look.y * d * 0.5, oz - look.z * d,
-                    1, -look.x * vel, 0.01, -look.z * vel, 0.0
-            );
-        }
-
-        for (int i = 0; i < 6; i++) {
-            double angle = i * Math.PI * 2.0 / 6;
-            world.sendParticles(
-                    WHITE_STREAK,
-                    ox + Math.cos(angle) * 0.4, oy, oz + Math.sin(angle) * 0.4,
-                    1, Math.cos(angle) * 0.10, 0.015, Math.sin(angle) * 0.10, 0.0
-            );
-        }
-
-        world.sendParticles(
-                ParticleTypes.SWEEP_ATTACK,
-                ox, player.getY() + 0.3, oz,
-                3, 0.5, 0.15, 0.5, 0
-        );
+        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+        PacketDistributor.sendToPlayer(player, p);
     }
 
     private static void spawnDashTrailParticles(ServerPlayer player) {
-        ServerLevel world = player.serverLevel();
         Vec3 vel = player.getDeltaMovement();
         if (vel.lengthSqr() < 0.1) return;
-        Vec3 back = vel.normalize().scale(-1);
 
-        world.sendParticles(
-                WHITE_PALE,
-                player.getX() + back.x * 0.5,
-                player.getY() + 0.8 + back.y * 0.5,
-                player.getZ() + back.z * 0.5,
-                6, 0.3, 0.4, 0.3, 0.02
+        SpeedDashTrailPayload p = new SpeedDashTrailPayload(
+                player.getX(), player.getY(), player.getZ(),
+                vel.x, vel.y, vel.z,
+                player.serverLevel().getGameTime()
         );
-
-        for (int i = 0; i < 5; i++) {
-            double ox = (world.random.nextDouble() - 0.5) * 1.5;
-            double oy = (world.random.nextDouble() - 0.5) * 1.5;
-            double oz = (world.random.nextDouble() - 0.5) * 1.5;
-            world.sendParticles(
-                    WHITE_STREAK,
-                    player.getX() + ox,
-                    player.getY() + 0.8 + oy,
-                    player.getZ() + oz,
-                    0,
-                    back.x * 0.6,
-                    back.y * 0.6,
-                    back.z * 0.6,
-                    1.0
-            );
-        }
-
-        if (world.getGameTime() % 2 == 0) {
-            world.sendParticles(
-                    ParticleTypes.SWEEP_ATTACK,
-                    player.getX() + back.x,
-                    player.getY() + 0.5,
-                    player.getZ() + back.z,
-                    1, 0.2, 0.2, 0.2, 0
-            );
-        }
+        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+        PacketDistributor.sendToPlayer(player, p);
     }
 
     private static void spawnOverdriveCastParticles(ServerPlayer player) {
-        ServerLevel world = player.serverLevel();
-        double ox = player.getX();
-        double oy = player.getY() + 1.0;
-        double oz = player.getZ();
-
-        for (int d = 0; d < 12; d++) {
-            double theta = d * Math.PI * 2.0 / 12;
-            double phi   = Math.PI / 4;
-            double speed = 0.20;
-            world.sendParticles(
-                    WHITE_BRIGHT, ox, oy, oz,
-                    1,
-                    Math.cos(theta) * Math.cos(phi) * speed,
-                    Math.sin(phi) * speed,
-                    Math.sin(theta) * Math.cos(phi) * speed,
-                    0.0
-            );
-        }
-
-        for (int i = 0; i < 10; i++) {
-            double angle = i * Math.PI * 2.0 / 10;
-            world.sendParticles(
-                    WHITE_STREAK,
-                    ox + Math.cos(angle) * 0.4, player.getY() + 0.1, oz + Math.sin(angle) * 0.4,
-                    1, Math.cos(angle) * 0.28, 0.01, Math.sin(angle) * 0.28, 0.0
-            );
-        }
-
-        world.sendParticles(
-                ParticleTypes.FIREWORK,
-                ox, oy, oz, 8, 0.5, 0.6, 0.5, 0.08
+        SpeedOverdriveCastPayload p = new SpeedOverdriveCastPayload(
+                player.getX(), player.getY(), player.getZ()
         );
-        world.sendParticles(
-                ParticleTypes.FLASH,
-                ox, oy, oz, 1, 0.4, 0.2, 0.4, 0
-        );
-        world.sendParticles(
-                ParticleTypes.SWEEP_ATTACK,
-                ox, oy, oz, 5, 0.7, 0.3, 0.7, 0
-        );
+        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+        PacketDistributor.sendToPlayer(player, p);
     }
 
-
     private static void spawnOverdriveTrailParticles(ServerPlayer player) {
-        ServerLevel world = player.serverLevel();
         Vec3 vel = player.getDeltaMovement();
-        double ox  = player.getX();
-        double oy  = player.getY() + 0.8;
-        double oz  = player.getZ();
+        if (vel.lengthSqr() < 0.001) return;
 
-        Vec3 back = vel.normalize().scale(-1);
-        for (int i = 0; i < 3; i++) {
-            double d       = 0.5 + i * 1.1;
-            double spread  = 0.10 + i * 0.08;
-            double speed   = 0.06 + i * 0.024;
-            world.sendParticles(
-                    (i % 2 == 0) ? WHITE_BRIGHT : WHITE_PALE,
-                    ox + back.x * d, oy + back.y * d * 0.3, oz + back.z * d,
-                    1, back.x * speed + spread, 0.03, back.z * speed + spread, 0.0
-            );
-        }
-
-        world.sendParticles(
-                ParticleTypes.CLOUD,
-                ox + back.x * 1.5, player.getY() + 0.5, oz + back.z * 1.5,
-                3, 0.25, 0.20, 0.25, 0.04
+        SpeedOverdriveTrailPayload p = new SpeedOverdriveTrailPayload(
+                player.getX(), player.getY(), player.getZ(),
+                vel.x, vel.y, vel.z,
+                player.serverLevel().getGameTime()
         );
-        world.sendParticles(
-                ParticleTypes.SMOKE,
-                ox + back.x, player.getY() + 0.7, oz + back.z,
-                2, 0.15, 0.15, 0.15, 0.03
-        );
-
-        world.sendParticles(
-                ParticleTypes.END_ROD,
-                ox, oy, oz,
-                4, 0.3, 0.6, 0.3, 0.06
-        );
-        world.sendParticles(
-                ParticleTypes.FIREWORK,
-                ox, oy, oz,
-                2, 0.35, 0.55, 0.25, 0.05
-        );
-
-        if ((int)(player.level().getGameTime() % 4) == 0) {
-            Vec3 right = new Vec3(-vel.z, 0, vel.x).normalize();
-            for (int i = 0; i < 4; i++) {
-                double angle = i * Math.PI * 2.0 / 4;
-                double rx    = right.x * Math.cos(angle) * 0.6;
-                double rz    = right.z * Math.cos(angle) * 0.6;
-                world.sendParticles(
-                        WHITE_STREAK,
-                        ox + rx, oy, oz + rz,
-                        1, back.x * 0.12 + rx * 0.06, 0.015, back.z * 0.12 + rz * 0.06, 0.0
-                );
-            }
-        }
+        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+        PacketDistributor.sendToPlayer(player, p);
     }
 
     /* ============================================================
@@ -934,7 +791,6 @@ public class SpeedPower implements PowerInterface {
 
     private static void handleBlockImpact(ServerPlayer player, SpeedState state, float shakeStrength) {
         if (!player.horizontalCollision) return;
-
         if (state.overdriveSlowTicks > 0) return;
 
         applyCollisionSlowBlock(player, state);
@@ -942,11 +798,13 @@ public class SpeedPower implements PowerInterface {
 
         CameraShake.shakeNearby(player, 12.0, 8, shakeStrength);
 
-        player.serverLevel().sendParticles(
-                ParticleTypes.EXPLOSION_EMITTER,
-                player.getX(), player.getY() + 1, player.getZ(),
-                3, 0.15, 0.10, 0.15, 0.02
+        // Light explosion FX — block impact
+        SpeedExplosionFxPayload p = new SpeedExplosionFxPayload(
+                player.getX(), player.getY(), player.getZ(), false
         );
+        PacketDistributor.sendToPlayersTrackingEntity(player, p);
+        PacketDistributor.sendToPlayer(player, p);
+
         player.serverLevel().playSound(
                 null, player.getX(), player.getY(), player.getZ(),
                 SoundEvents.DRAGON_FIREBALL_EXPLODE,
@@ -1019,7 +877,7 @@ public class SpeedPower implements PowerInterface {
     public String getSecondaryName() { return Component.translatable("power.loopypowers.speed.secondary_name").getString(); }
 
     @Override
-    public long getSecondaryCooldownMs() { return 18_000; }
+    public long getSecondaryCooldownMs() { return 27_000; }
 
     @Override
     public String getSecondaryDescription() {

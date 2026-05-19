@@ -594,8 +594,6 @@ public class FortunePower implements PowerInterface {
     private static final int HOUSE_RADIUS = 8;
     private static final int HOUSE_WALL_LAYERS = 4;
     private static final int HOUSE_BUILD_INTERVAL_TICKS = 7;
-    // Increased active ticks by 60 (+3 seconds). This flawlessly fits exactly 4 rules
-    // before the house naturally despawns!
     private static final int HOUSE_ACTIVE_TICKS = 298;
     private static final int HOUSE_CLEAR_HEIGHT = 10;
     private static final int HOUSE_MAX_RULES = 4;
@@ -642,7 +640,7 @@ public class FortunePower implements PowerInterface {
     private static final int   HOUSE_RULE_EFFECT_BONUS_TICKS = 40; // +2s
 
     // Chip Toss
-    private static final float RULE_CHIP_TOSS_FRACTION = 0.50f; // 50%
+    private static final float RULE_CHIP_TOSS_FRACTION = 0.70f; // 50%
     private static final double RULE_CHIP_TOSS_UP_MIN = 1.05;
     private static final double RULE_CHIP_TOSS_UP_MAX = 1.75;
     private static final double RULE_CHIP_TOSS_SIDE = 0.35;

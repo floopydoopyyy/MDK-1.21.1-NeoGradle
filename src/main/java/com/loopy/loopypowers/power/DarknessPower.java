@@ -131,7 +131,7 @@ public class DarknessPower implements PowerInterface {
        PASSIVE
        ============================================================ */
 
-    private static final float BACKSTAB_BONUS_MULT = 1.30f;
+    private static final float BACKSTAB_BONUS_MULT = 1.40f;
 
     private static boolean isBehindTarget(LivingEntity attacker, LivingEntity victim) {
         if (attacker instanceof ServerPlayer player) {
@@ -233,9 +233,6 @@ public class DarknessPower implements PowerInterface {
 
         RenderPackets.hidePlayerFromOthers(player, MIST_DURATION);
 
-        player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, MIST_DURATION, 1, false, false, true));
-        player.addEffect(new MobEffectInstance(MobEffects.JUMP, MIST_DURATION, 0, false, false, true));
-
         w.playSound(null, player.blockPosition(), ModSounds.MISTENTER.get(), player.getSoundSource(), 1.0f, 1.0f);
 
         w.sendParticles(DARK_DUST, player.getX(), player.getY() + player.getBbHeight() * 0.5, player.getZ(), 35, 0.8, 1.0, 0.8, 0.02);
@@ -279,7 +276,6 @@ public class DarknessPower implements PowerInterface {
         Vec3 newVel = look.scale(speed);
         player.setDeltaMovement(newVel);
 
-        // MOVEMENT FIX: Forces the server to send the motion update to the client!
         player.hurtMarked = true;
         player.hasImpulse = true;
 
@@ -292,7 +288,8 @@ public class DarknessPower implements PowerInterface {
         }
         player.stopUsingItem();
         player.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 20, 5, true, false));
-        player.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, 20, 0, true, false));
+        player.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, 50, 0, true, true));
+        player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 50, 2, true, true));
     }
 
     private static final DustParticleOptions DARK_DUST =
@@ -301,7 +298,6 @@ public class DarknessPower implements PowerInterface {
     private static void spawnMistTrail(ServerPlayer player, int ticks) {
         ServerLevel w = player.serverLevel();
 
-        // Server optimization: Only spawn the trail particles every 2 ticks instead of every single tick
         if (ticks % 2 == 0) {
             w.sendParticles(
                     DARK_DUST,

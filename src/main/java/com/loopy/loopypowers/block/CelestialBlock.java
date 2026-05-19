@@ -1,6 +1,5 @@
 package com.loopy.loopypowers.block;
 
-// import com.loopy.loopypowers.manager.PowerManager;
 import com.loopy.loopypowers.manager.PowerManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -9,6 +8,7 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
@@ -17,33 +17,35 @@ import org.joml.Vector3f;
 
 public class CelestialBlock extends Block {
 
-    private static final long COOLDOWN_REDUCTION_PER_TICK = 70; // about 25-30% increase
+    private static final long COOLDOWN_REDUCTION_PER_TICK = 60; //
 
     public CelestialBlock(BlockBehaviour.Properties properties) {
         super(properties);
     }
 
     /* ============================================================
-       COOLDOWN EFFECT
+       COOLDOWN EFFECT & PARTICLES
        ============================================================ */
 
     @Override
     public void stepOn(Level level, BlockPos pos, BlockState state, Entity entity) {
         super.stepOn(level, pos, state, entity);
 
-        if (level.isClientSide) return;
-
-        if (entity instanceof ServerPlayer player) {
-            if (PowerManager.getPower(player) == null) return;
-            PowerManager.reduceAllCooldowns(player, COOLDOWN_REDUCTION_PER_TICK);
-            spawnCooldownParticles(player);
+        if (level.isClientSide) {
+            // vfx
+            if (entity instanceof Player player) {
+                spawnCooldownParticlesClient(player, level);
+            }
+        } else {
+            // logic
+            if (entity instanceof ServerPlayer player) {
+                if (PowerManager.getPower(player) == null) return;
+                PowerManager.reduceAllCooldowns(player, COOLDOWN_REDUCTION_PER_TICK);
+            }
         }
     }
 
-    private void spawnCooldownParticles(ServerPlayer player) {
-        var level = player.serverLevel();
-
-        // player.age becomes player.tickCount
+    private void spawnCooldownParticlesClient(Player player, Level level) {
         if (player.tickCount % 3 != 0) return;
 
         double px = player.getX();
@@ -66,24 +68,21 @@ public class CelestialBlock extends Block {
             double vx = Math.cos(angle) * 0.01;
             double vz = Math.sin(angle) * 0.01;
 
-            // world.spawnParticles becomes level.sendParticles on the server side
-            level.sendParticles(
+            // level.addParticle is strictly client-side and requires zero network packets
+            level.addParticle(
                     PURPLE,
                     x, y, z,
-                    1,
-                    vx, 0.02, vz,
-                    0
+                    vx, 0.02, vz
             );
         }
     }
 
     /* ============================================================
-       PARTICLES
+       AMBIENT PARTICLES
        ============================================================ */
 
     @Override
     public void animateTick(BlockState state, Level level, BlockPos pos, RandomSource random) {
-
         Direction dir = Direction.getRandom(random);
 
         double x = pos.getX() + 0.5 + dir.getStepX() * 0.55;
