@@ -69,7 +69,7 @@ public class PerfectedCoreItem extends Item {
 
         // requires 2
         if (playerLevel != 2) {
-            if (playerLevel >= 3) {
+            if (playerLevel == 3) {
                 player.displayClientMessage(
                         Component.translatable("message.loopypowers.perfected_core.level_maxed").withStyle(ChatFormatting.RED),
                         true

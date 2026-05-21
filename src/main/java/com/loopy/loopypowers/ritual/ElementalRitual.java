@@ -23,7 +23,7 @@ public class ElementalRitual implements RitualInterface {
             LightningPower::new
     );
 
-    // Keep logical constants on the server
+    // Keep logical stuff on server
     private static final int STAGE_1_TICKS = 70;
     private static final int STAGE_2_TICKS = 60;
     private static final int STAGE_3_TICKS = 55;

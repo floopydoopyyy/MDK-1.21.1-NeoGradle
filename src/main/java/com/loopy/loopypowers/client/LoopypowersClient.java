@@ -174,6 +174,15 @@ public class LoopypowersClient {
             registrar.playToClient(TelekinesisParticlePayload.TYPE, TelekinesisParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleTelekinesisParticles);
             // ritual
             registrar.playToClient(ElementalRitualTickPayload.TYPE, ElementalRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleElementalRitual);
+            registrar.playToClient(LifeRitualTickPayload.TYPE, LifeRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleLifeRitual);
+            registrar.playToClient(MindRitualTickPayload.TYPE, MindRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleMindRitual);
+            registrar.playToClient(MotionRitualTickPayload.TYPE, MotionRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleMotionRitual);
+            registrar.playToClient(PerfectedUpgradeRitualTickPayload.TYPE, PerfectedUpgradeRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handlePerfectedUpgradeRitual);
+            registrar.playToClient(PowerRitualTickPayload.TYPE, PowerRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handlePowerRitual);
+            registrar.playToClient(PowerUpgradeRitualTickPayload.TYPE, PowerUpgradeRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handlePowerUpgradeRitual);
+            registrar.playToClient(RuinRitualTickPayload.TYPE, RuinRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleRuinRitual);
+            registrar.playToClient(SeveranceRitualTickPayload.TYPE, SeveranceRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleSeveranceRitual);
+            registrar.playToClient(SpaceRitualTickPayload.TYPE, SpaceRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleSpaceRitual);
         }
     }
 

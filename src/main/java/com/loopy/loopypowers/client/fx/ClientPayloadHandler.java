@@ -2,6 +2,7 @@ package com.loopy.loopypowers.client.fx;
 
 import com.loopy.loopypowers.entity.BlackHoleEntity;
 import com.loopy.loopypowers.network.payload.*;
+import com.loopy.loopypowers.ritual.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
@@ -451,6 +452,105 @@ public class ClientPayloadHandler {
                 Entity entity = context.player().level().getEntity(payload.entityId());
                 if (entity instanceof Player player) {
                     ElementalRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleLifeRitual(final LifeRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    LifeRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleMindRitual(final MindRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    MindRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleMotionRitual(final MotionRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    MotionRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handlePerfectedUpgradeRitual(final PerfectedUpgradeRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    PerfectedUpgradeRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handlePowerRitual(final PowerRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    PowerRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handlePowerUpgradeRitual(final PowerUpgradeRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    PowerUpgradeRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleRuinRitual(final RuinRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    RuinRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleSeveranceRitual(final SeveranceRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    SeveranceRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
+    }
+
+    public static void handleSpaceRitual(final SpaceRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    SpaceRitualClient.tick(player.level(), player, payload.ticks());
                 }
             }
         });
