@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
@@ -226,6 +227,8 @@ public class SoundPower implements PowerInterface {
         // resets velocity before stunning so they stop moving
         target.setDeltaMovement(0, Math.min(target.getDeltaMovement().y, 0.0), 0);
         target.hasImpulse = true;
+        target.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
+        if (target instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
         // Apply stun
         target.addEffect(new MobEffectInstance(ModEffects.STUN, 35, 0, false, false, true));
@@ -493,6 +496,8 @@ public class SoundPower implements PowerInterface {
             );
 
             t.hasImpulse = true;
+            t.hurtMarked  = true; // sync pull velocity to all tracking clients
+            if (t instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
             s.scanned.add(t.getUUID());
         }
@@ -624,6 +629,8 @@ public class SoundPower implements PowerInterface {
         dir = dir.normalize();
         target.setDeltaMovement(target.getDeltaMovement().add(dir.x * BD_FINAL_KB, BD_FINAL_UP, dir.z * BD_FINAL_KB));
         target.hasImpulse = true;
+        target.hurtMarked  = true; // explicit sync; remote stun targets pass damage=0 so hurt() is never called
+        if (target instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
         // Apply STUN Effect if resonated
         SoundVictimState vState = VICTIM_STATES.get(target.getUUID());
@@ -762,6 +769,8 @@ public class SoundPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         player.setDeltaMovement(0.0, Math.min(v.y, 0.0), 0.0);
         player.hasImpulse = true;
+        player.hurtMarked  = true; // without this the caster's client prediction wins every tick during windup
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
         player.setSprinting(false);
         player.fallDistance = 0.0f;
 
@@ -814,6 +823,8 @@ public class SoundPower implements PowerInterface {
             target.hurt(ModDamageTypes.sound(target.level(), caster), ULT_DAMAGE);
             target.setDeltaMovement(target.getDeltaMovement().add(dir.x * ULT_KB, ULT_UP, dir.z * ULT_KB));
             target.hasImpulse = true;
+            target.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
+            if (target instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
         }
 
         tearGroundAlongBeam(w, start, end);

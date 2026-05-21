@@ -27,11 +27,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.network.PacketDistributor;
-import com.loopy.loopypowers.network.payload.FlightBoomWindupPayload;
-import com.loopy.loopypowers.network.payload.FlightBoomDashPayload;
-import com.loopy.loopypowers.network.payload.FlightBoomImpactPayload;
-
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -444,16 +439,16 @@ public class FlightPower implements PowerInterface {
     }
 
     // SECONDARY: Updraft (Homelander Takeoff & Burst)
-    private static final double UPDRAFT_LAUNCH_Y = 4.5; // Faster burst initial launch
+    private static final double UPDRAFT_LAUNCH_Y = 3.2; // Reduced from 4.5 for more control
     private static final double UPDRAFT_KNOCKBACK_RADIUS = 5.0;
     private static final double UPDRAFT_KNOCKBACK_STRENGTH = 1.8;
 
-    private static final int UPDRAFT_EMPOWERMENT_DURATION = 12; // Shorter forced climb
+    private static final int UPDRAFT_EMPOWERMENT_DURATION = 10; // Slightly shorter forced climb
     private static final double UPDRAFT_EMPOWERMENT_PUSH_Y = 0.25;
-    private static final double UPDRAFT_MAX_Y_SPEED = 5.5;
+    private static final double UPDRAFT_MAX_Y_SPEED = 3.8; // Reduced from 5.5 to prevent extreme overshooting
 
     // Ceiling bursting mechanics
-    private static final int UPDRAFT_MAX_BLOCKS_BROKEN = 8;
+    private static final int UPDRAFT_MAX_BLOCKS_BROKEN = 20; // Increased capacity for the wider 9-point grid
     private static final float UPDRAFT_MAX_HARDNESS = 5.0f; // Breaks up to Iron block hardness. Obsi is 50.
     private static final float UPDRAFT_DAMAGE_PER_BLOCK = 1.0f;
 
@@ -498,9 +493,9 @@ public class FlightPower implements PowerInterface {
             Vec3 kb = away.normalize().scale(UPDRAFT_KNOCKBACK_STRENGTH).add(0, 0.5, 0);
             e.setDeltaMovement(e.getDeltaMovement().add(kb));
             e.hasImpulse = true;
+            e.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
 
             if (e instanceof ServerPlayer targetPlayer) {
-                targetPlayer.hurtMarked = true;
                 targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
             }
         }
@@ -531,18 +526,29 @@ public class FlightPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         int blocksBrokenNow = 0;
 
-        // Multi-Point Raycast to reliably break blocks above the player's collision bounds
-        double hW = player.getBbWidth() * 0.4;
+        // Multi-Point Raycast to reliably break blocks above the player's collision bounds.
+        // We use 0.6 (slightly wider than the player's actual 0.3 half-width) to prevent
+        // the player's shoulders from grazing unbreakable adjacent blocks.
+        double hW = player.getBbWidth() * 0.6;
+
+        // Expanded to a 9-point grid for a perfect 3x3 tunnel
         Vec3[] offsets = {
-                new Vec3(0, 0, 0),
-                new Vec3(hW, 0, hW),
+                new Vec3(0, 0, 0),         // Center
+                new Vec3(hW, 0, hW),       // Corners
                 new Vec3(-hW, 0, hW),
                 new Vec3(hW, 0, -hW),
-                new Vec3(-hW, 0, -hW)
+                new Vec3(-hW, 0, -hW),
+                new Vec3(hW, 0, 0),        // Edges
+                new Vec3(-hW, 0, 0),
+                new Vec3(0, 0, hW),
+                new Vec3(0, 0, -hW)
         };
 
         boolean hitUnbreakable = false;
-        double checkDist = Math.max(v.y, 2.5); // Ensure we always look at least 2.5 blocks up
+
+        // Look slightly further ahead (3.5 blocks) to ensure we break the ceiling
+        // before the physics engine calculates collision and halts momentum.
+        double checkDist = Math.max(v.y, 3.5);
 
         for (Vec3 offset : offsets) {
             // Start raycast slightly inside the head to catch blocks already touching the player
@@ -645,10 +651,6 @@ public class FlightPower implements PowerInterface {
     public void activateUltimate(ServerPlayer player) {
         if (player.onGround() || player.isInWater()) return;
 
-        ServerLevel world = player.serverLevel();
-        world.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.WARDEN_SONIC_CHARGE, player.getSoundSource(),
-                0.95f, 0.9f);
-
         FlightState state = getState(player);
 
         state.boomWindup = BOOM_WINDUP_TICKS;
@@ -663,7 +665,14 @@ public class FlightPower implements PowerInterface {
 
         player.fallDistance = 0;
 
-        spawnBoomWindupFx(player, true);
+        ServerLevel w = player.serverLevel();
+        w.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.WARDEN_SONIC_CHARGE,
+                player.getSoundSource(), 1.5f, 1.0f);
+
+        w.sendParticles(ParticleTypes.ENCHANTED_HIT,
+                player.getX(), player.getY() + 1.0, player.getZ(),
+                1, 0, 0, 0, 0);
     }
 
     private void tickSonicBoomUltimate(ServerPlayer player, FlightState state) {
@@ -685,7 +694,12 @@ public class FlightPower implements PowerInterface {
             player.fallDistance = 0;
 
             if (state.boomWindup % 2 == 0) {
-                spawnBoomWindupFx(player, false);
+                world.sendParticles(ParticleTypes.CLOUD,
+                        player.getX(), player.getY() + 1.0, player.getZ(),
+                        6, 0.35, 0.45, 0.35, 0.01);
+                world.sendParticles(ParticleTypes.ELECTRIC_SPARK,
+                        player.getX(), player.getY() + 1.0, player.getZ(),
+                        8, 0.45, 0.55, 0.45, 0.02);
             }
 
             if (state.boomWindup <= 0) {
@@ -702,7 +716,9 @@ public class FlightPower implements PowerInterface {
                 player.hurtMarked = true;
                 player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
-                spawnBoomDashFx(player, dir, true);
+                world.playSound(null, player.getX(), player.getY(), player.getZ(),
+                        SoundEvents.WARDEN_SONIC_BOOM,
+                        player.getSoundSource(), 1.6f, 1.0f);
             }
 
             return;
@@ -737,7 +753,7 @@ public class FlightPower implements PowerInterface {
             player.fallDistance = 0;
             player.startFallFlying();
 
-            spawnBoomDashFx(player, dir, false);
+            spawnBoomTunnel(world, player, dir);
 
             AABB box = player.getBoundingBox().inflate(BOOM_RADIUS);
             List<LivingEntity> nearby = world.getEntitiesOfClass(LivingEntity.class, box,
@@ -762,10 +778,10 @@ public class FlightPower implements PowerInterface {
                     Vec3 knock = away.normalize().scale(0.9).add(0, 0.15, 0);
                     e.setDeltaMovement(e.getDeltaMovement().add(knock.x, knock.y, knock.z));
                     e.hasImpulse = true;
+                    e.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
 
                     // Sync knockback for pushed players
                     if (e instanceof ServerPlayer targetPlayer) {
-                        targetPlayer.hurtMarked = true;
                         targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
                     }
                 }
@@ -864,6 +880,25 @@ public class FlightPower implements PowerInterface {
        HELPERS
        ============================================================ */
 
+    private void spawnBoomTunnel(ServerLevel w, ServerPlayer p, Vec3 dir) {
+        Vec3 pos = p.position().add(0, 1.0, 0);
+        Vec3 back = dir.scale(-1.0);
+
+        for (int i = 0; i < 3; i++) {
+            Vec3 pt = pos.add(back.scale(i * 1.5));
+
+            w.sendParticles(ParticleTypes.CLOUD,
+                    pt.x, pt.y, pt.z,
+                    3, 0.4, 0.4, 0.4, 0.02);
+
+            if (RNG.nextFloat() < 0.25f) {
+                w.sendParticles(ParticleTypes.SWEEP_ATTACK,
+                        pt.x, pt.y, pt.z,
+                        1, 0, 0, 0, 0);
+            }
+        }
+    }
+
     private boolean boomHitsBlock(ServerLevel world, ServerPlayer player) {
         Vec3 vel = player.getDeltaMovement();
         if (vel.lengthSqr() < 1.0e-4) return false;
@@ -884,7 +919,11 @@ public class FlightPower implements PowerInterface {
     private void doBoomImpact(ServerLevel world, ServerPlayer player) {
         Vec3 c = player.position();
 
-        spawnBoomImpactFx(world, c);
+        world.sendParticles(ParticleTypes.EXPLOSION_EMITTER,
+                c.x, c.y + 1.0, c.z, 1, 0, 0, 0, 0);
+        world.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.GENERIC_EXPLODE,
+                player.getSoundSource(), 1.2f, 0.9f);
 
         float explodepower = 1.8f;
 
@@ -913,10 +952,10 @@ public class FlightPower implements PowerInterface {
             Vec3 kb = away.normalize().scale(BOOM_IMPACT_KB).add(0, 0.45, 0);
             e.setDeltaMovement(e.getDeltaMovement().add(kb.x, kb.y, kb.z));
             e.hasImpulse = true;
+            e.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
 
             // kb sync
             if (e instanceof ServerPlayer targetPlayer) {
-                targetPlayer.hurtMarked = true;
                 targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
             }
         }
@@ -924,7 +963,6 @@ public class FlightPower implements PowerInterface {
         player.setDeltaMovement(0, Math.min(player.getDeltaMovement().y, -0.25), 0);
         player.hasImpulse = true;
 
-        // FIX: Sync the player stop velocity
         player.hurtMarked = true;
         player.connection.send(new ClientboundSetEntityMotionPacket(player));
     }
@@ -933,29 +971,6 @@ public class FlightPower implements PowerInterface {
         state.boomDash = 0;
         state.boomInvuln = false;
         state.boomYaw = 0;
-    }
-
-    private static void spawnBoomWindupFx(ServerPlayer player, boolean isStart) {
-        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
-                player,
-                new FlightBoomWindupPayload(player.getId(), isStart)
-        );
-    }
-
-    private static void spawnBoomDashFx(ServerPlayer player, Vec3 dir, boolean isStart) {
-        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
-                player,
-                new FlightBoomDashPayload(player.getId(), dir, isStart)
-        );
-    }
-
-    private static void spawnBoomImpactFx(ServerLevel w, Vec3 pos) {
-        PacketDistributor.sendToPlayersNear(
-                w, null,
-                pos.x, pos.y, pos.z,
-                64.0D,
-                new FlightBoomImpactPayload(pos)
-        );
     }
 
     /* ============================================================

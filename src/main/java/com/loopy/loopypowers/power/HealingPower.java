@@ -436,6 +436,11 @@ public class HealingPower implements PowerInterface {
                 ));
 
                 e.hasImpulse = true;
+                e.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
+
+                if (e instanceof ServerPlayer sp) {
+                    sp.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(sp));
+                }
             }
 
             // cleanse

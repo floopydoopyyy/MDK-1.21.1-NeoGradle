@@ -244,8 +244,8 @@ public class SpeedPower implements PowerInterface {
 
         player.setDeltaMovement(state.dashDir);
         player.hasImpulse = true;
-
-        spawnDashCastParticles(player, look);
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
         player.serverLevel().playSound(null, player.getX(), player.getY(), player.getZ(), ModSounds.DASH.get(), player.getSoundSource(), 1.0f, 1.0f);
     }
@@ -319,9 +319,9 @@ public class SpeedPower implements PowerInterface {
                                 pushDir.z * DASH_KNOCKBACK
                         ));
                         victim.hasImpulse = true;
+                        victim.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
                         if (victim instanceof ServerPlayer sp) {
-                            sp.hurtMarked = true;
                             sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                         }
 
@@ -430,6 +430,8 @@ public class SpeedPower implements PowerInterface {
             if (vel.y < 0 && !player.onGround()) {
                 player.setDeltaMovement(vel.x, vel.y * 0.4, vel.z);
                 player.hasImpulse = true;
+                player.hurtMarked = true;
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
             }
 
             spawnDashTrailParticles(player);
@@ -448,9 +450,9 @@ public class SpeedPower implements PowerInterface {
                         Vec3 push = target.position().subtract(player.position()).normalize();
                         target.setDeltaMovement(push.x * PINBALL_KNOCKBACK, PINBALL_KNOCKBACK_Y, push.z * PINBALL_KNOCKBACK);
                         target.hasImpulse = true;
+                        target.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
                         if (target instanceof ServerPlayer sp) {
-                            sp.hurtMarked = true;
                             sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                         }
 
@@ -464,6 +466,7 @@ public class SpeedPower implements PowerInterface {
                 // Stop at the target
                 player.setDeltaMovement(0, 0, 0);
                 player.hasImpulse = true;
+                player.hurtMarked = true;
                 player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
                 // Clear target so the next tick instantly begins the finding/launching phase
@@ -601,6 +604,7 @@ public class SpeedPower implements PowerInterface {
                                 dir.z * OVERDRIVE_ENTITY_KNOCKBACK
                         ));
                         entity.hasImpulse = true;
+                        entity.hurtMarked = true; // sync velocity to all tracking clients
 
                         applyCollisionSlow(player, state);
 

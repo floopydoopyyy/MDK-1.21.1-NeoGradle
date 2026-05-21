@@ -12,6 +12,7 @@ import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -28,7 +29,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.RelativeMovement;
-import net.minecraft.world.entity.ai.targeting.TargetingConditions;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
@@ -630,6 +630,7 @@ public class PsychicPower implements PowerInterface {
                 if (flatDir.lengthSqr() > 0.0001) flatDir = flatDir.normalize();
                 entity.setDeltaMovement(flatDir.x * mobSpeed, nextY, flatDir.z * mobSpeed);
                 entity.hasImpulse = true;
+                entity.hurtMarked  = true; // sync velocity to tracking clients, not just position
 
                 if (entity.level() instanceof ServerLevel sw) {
                     sw.getChunkSource().broadcastAndSend(entity, new ClientboundTeleportEntityPacket(entity));
@@ -637,6 +638,7 @@ public class PsychicPower implements PowerInterface {
             } else {
                 entity.setDeltaMovement(velocity.x * 0.4, nextY, velocity.z * 0.4);
                 entity.hasImpulse = true;
+                entity.hurtMarked  = true; // sync braking velocity to tracking clients
             }
 
         } else if (entity instanceof ServerPlayer player) {
@@ -650,9 +652,13 @@ public class PsychicPower implements PowerInterface {
                 }
                 entity.setDeltaMovement(newVel.x, nextY, newVel.z);
                 entity.hasImpulse = true;
+                player.hurtMarked  = true; // without this the compelled player's client prediction wins every tick
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
             } else {
                 entity.setDeltaMovement(velocity.x * 0.4, nextY, velocity.z * 0.4);
                 entity.hasImpulse = true;
+                player.hurtMarked  = true; // sync braking velocity so client doesn't override it
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
             }
         }
     }

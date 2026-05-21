@@ -11,6 +11,7 @@ import com.loopy.loopypowers.entity.BloodClotEntity;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -293,6 +294,11 @@ public class BloodPower implements PowerInterface {
 
             hitEntity.setDeltaMovement(hitEntity.getDeltaMovement().add(pullDir.x * WHIP_YANK_XZ, WHIP_YANK_Y, pullDir.z * WHIP_YANK_XZ));
             hitEntity.hasImpulse = true;
+
+            if (hitEntity instanceof ServerPlayer spTarget) {
+                spTarget.hurtMarked = true;
+                spTarget.connection.send(new ClientboundSetEntityMotionPacket(spTarget));
+            }
 
             world.sendParticles(ParticleTypes.DAMAGE_INDICATOR,
                     hitEntity.getX(), hitEntity.getY() + 1.0, hitEntity.getZ(),

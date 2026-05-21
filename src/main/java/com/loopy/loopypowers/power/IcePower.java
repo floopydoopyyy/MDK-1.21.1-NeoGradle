@@ -10,6 +10,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -274,6 +275,8 @@ public class IcePower implements PowerInterface {
             Vec3 v = e.getDeltaMovement();
             e.setDeltaMovement(v.x * 0.25, Mth.clamp(v.y, -0.5, 0.5), v.z * 0.25);
             e.hasImpulse = true;
+            e.hurtMarked  = true; // sync freeze-drag velocity to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
             e.fallDistance = 0.0f;
             e.setTicksFrozen(Math.max(e.getTicksFrozen(), 140));
         }
@@ -586,6 +589,8 @@ public class IcePower implements PowerInterface {
             Vec3 v = e.getDeltaMovement();
             e.setDeltaMovement(v.x, Math.min(SPIKES_MAX_Y_VEL, Math.max(v.y, SPIKES_KNOCKUP_Y)), v.z);
             e.hasImpulse = true;
+            e.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
             e.fallDistance = 0.0f;
             shatterOrFreeze(caster, e, SPIKES_FREEZE_STACKS);
         }
@@ -632,6 +637,8 @@ public class IcePower implements PowerInterface {
             Vec3 v = player.getDeltaMovement();
             player.setDeltaMovement(0.0, v.y, 0.0);
             player.hasImpulse = true;
+            player.hurtMarked  = true;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
             player.setSprinting(false);
             player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 4, 4, true, false));
             PacketDistributor.sendToPlayersTrackingEntityAndSelf(player,
@@ -648,6 +655,8 @@ public class IcePower implements PowerInterface {
             Vec3 v = player.getDeltaMovement();
             player.setDeltaMovement(0.0, v.y, 0.0);
             player.hasImpulse = true;
+            player.hurtMarked  = true;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
             player.setSprinting(false);
             player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 4, 2, true, false));
 
@@ -733,6 +742,8 @@ public class IcePower implements PowerInterface {
         double ny = Math.max(v.y > 0.12 ? 0.12 : v.y - 0.08, -0.65);
         e.setDeltaMovement(v.x * 0.20, ny, v.z * 0.20);
         e.hasImpulse = true;
+        e.hurtMarked  = true; // sync drag velocity to all tracking clients
+        if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
         e.fallDistance = 0.0f;
     }
 
@@ -962,6 +973,8 @@ public class IcePower implements PowerInterface {
             double newY  = Math.min(0.55, Math.max(v.y, ULT_WAVE_UP));
             e.setDeltaMovement(v.x + dx * inv * ULT_WAVE_KB, newY, v.z + dz * inv * ULT_WAVE_KB);
             e.hasImpulse = true;
+            e.hurtMarked  = true; // explicit sync; hurt() is conditional on caster type so can't be relied on
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
             e.fallDistance = 0.0f;
         }
     }

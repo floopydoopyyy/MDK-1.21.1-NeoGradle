@@ -54,33 +54,35 @@ public class CosmicPower implements PowerInterface {
 
     // ── Passive tuning ────────────────────────────────────────────────────────
 
-    private static final int   FATE_TIMER_DEFAULT     = 200;
-    private static final int   FATE_TIMER_MAX         = 300;
-    private static final float FATE_DAMAGE_CAP        = 60.0f;
-    private static final int   FATE_DETONATE_TICKS    = 30;
+    private static final int   FATE_TIMER_MAX         = 300; // 15 seconds
+    private static final float FATE_DAMAGE_CAP        = 55.0f;
+    private static final int   FATE_DETONATE_TICKS    = 40;
     private static final int   FATE_DETONATE_INTERVAL = 10;
-    private static final float MELEE_FATE_RATIO       = 0.8f;
-    private static final int   MELEE_TIMER_ADD        = 12;
+    private static final float MELEE_FATE_RATIO       = 0.6f;
+    private static final int   MELEE_TIMER_REDUCE     = 25; // ticks subtracted per hit
     private static final int   MELEE_TIMER_CD         = 10;
     private static final int   FATE_IMMUNE_TICKS      = 200;
+
+    // Distance Decay
+    private static final double FATE_DECAY_DISTANCE   = 9.0;
+    private static final float  FATE_DECAY_PER_TICK   = 0.5f;
 
     // ── Primary tuning ────────────────────────────────────────────────────────
 
     private static final double RAY_RANGE         = 30.0;
     private static final float  RAY_DIRECT_DAMAGE = 3.5f;
-    private static final float  RAY_FATE_STORE    = 9.0f;
-    private static final int    RAY_TIMER_ADD     = 50;
+    private static final float  RAY_FATE_STORE    = 7.0f;
+    private static final int    RAY_TIMER_ADD     = 40; // Increases timer to stall detonation
 
     // ── Secondary tuning ─────────────────────────────────────────────────────
 
     private static final double STAR_SLAM_RADIUS     = 4.0;
-    private static final float  STAR_FATE_STORE      = 14.0f;
-    private static final float  STAR_TIMER_REDUCTION = 0.60f;
+    private static final float  STAR_FATE_STORE      = 9.0f;
+    private static final float  STAR_TIMER_REDUCTION = 0.50f; // halves the timer
     private static final int    STAR_ARC_TICKS       = 40;
 
     // ── Ultimate tuning ───────────────────────────────────────────────────────
 
-    // Changed from 1.5f (150% reduction) to a flat 5 extra ticks drained per game tick
     private static final int    BH_TIMER_REDUCTION = 5;
 
     /* ============================================================
@@ -165,6 +167,25 @@ public class CosmicPower implements PowerInterface {
                     continue;
                 }
 
+                // decay
+                double distSq = target.distanceToSqr(player);
+                if (distSq > FATE_DECAY_DISTANCE * FATE_DECAY_DISTANCE && fate.detonateTicks <= 0) {
+                    fate.storedDamage -= FATE_DECAY_PER_TICK;
+
+                    if (fate.storedDamage <= 0) {
+                        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), 0, 0));
+                        syncFateEffect(target, 0);
+
+                        world.playSound(null, target.blockPosition(), SoundEvents.AMETHYST_BLOCK_BREAK, target.getSoundSource(), 1.0f, 0.5f);
+                        world.sendParticles(ParticleTypes.CRIT, target.getX(), target.getY() + 1.0, target.getZ(), 20, 0.4, 0.4, 0.4, 0.1);
+
+                        it.remove();
+                        continue;
+                    } else if (target.tickCount % 10 == 0) {
+                        PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));
+                    }
+                }
+
                 // Tick Melee CD
                 if (fate.meleeTimerCdTicks > 0) {
                     fate.meleeTimerCdTicks--;
@@ -197,7 +218,6 @@ public class CosmicPower implements PowerInterface {
                         fate.detonateTicks = FATE_DETONATE_TICKS;
                         spawnDetonateStartParticles(world, target);
                     } else {
-                        // Server no longer processes particles here, just syncs the effect!
                         syncFateEffect(target, fate.timerTicks);
                     }
                 } else if (fate.storedDamage <= 0) {
@@ -242,20 +262,25 @@ public class CosmicPower implements PowerInterface {
 
     public static void applyMeleeFate(ServerPlayer attacker, LivingEntity target, float damageDealt) {
         float fatePortion = damageDealt * MELEE_FATE_RATIO;
-        addFate(target, fatePortion, 0, attacker.getUUID());
 
-        // check if melee CD allows us to add timer
         Map<UUID, FateInstance> playerFates = ACTIVE_FATES.get(attacker.getUUID());
-        if (playerFates != null) {
-            FateInstance fate = playerFates.get(target.getUUID());
-            if (fate != null && fate.meleeTimerCdTicks <= 0) {
-                addFate(target, 0, MELEE_TIMER_ADD, attacker.getUUID());
+        FateInstance fate = playerFates != null ? playerFates.get(target.getUUID()) : null;
+
+        if (fate == null) {
+            // First hit: Starts timer and sets to FATE_TIMER_MAX
+            addFate(target, fatePortion, 0, attacker.getUUID());
+        } else {
+            // Subsequent hits: Reduces timer a bit
+            int timerMod = 0;
+            if (fate.meleeTimerCdTicks <= 0) {
+                timerMod = -MELEE_TIMER_REDUCE;
                 fate.meleeTimerCdTicks = MELEE_TIMER_CD;
             }
+            addFate(target, fatePortion, timerMod, attacker.getUUID());
         }
     }
 
-    private static void addFate(LivingEntity target, float fateDmg, int timerAdd, UUID attackerUuid) {
+    private static void addFate(LivingEntity target, float fateDmg, int timerChange, UUID attackerUuid) {
         UUID targetId = target.getUUID();
         FateInstance fate = null;
         UUID previousOwner = null;
@@ -273,12 +298,11 @@ public class CosmicPower implements PowerInterface {
             fate = new FateInstance();
         }
 
-        // Handle ownership transfer (if a new attacker hits an already-afflicted target)
+        // Handle ownership transfer
         if (attackerUuid != null && !attackerUuid.equals(previousOwner)) {
             if (previousOwner != null) {
-                ACTIVE_FATES.get(previousOwner).remove(targetId); // Remove from old owner
+                ACTIVE_FATES.get(previousOwner).remove(targetId);
             }
-            // Add to new owner
             ACTIVE_FATES.computeIfAbsent(attackerUuid, k -> new HashMap<>()).put(targetId, fate);
             fate.ownerUuid = attackerUuid;
         }
@@ -299,9 +323,9 @@ public class CosmicPower implements PowerInterface {
         }
 
         if (fate.timerTicks <= 0) {
-            fate.timerTicks = FATE_TIMER_DEFAULT;
+            fate.timerTicks = FATE_TIMER_MAX;
         } else {
-            fate.timerTicks = Math.min(fate.timerTicks + timerAdd, FATE_TIMER_MAX);
+            fate.timerTicks = Mth.clamp(fate.timerTicks + timerChange, 1, FATE_TIMER_MAX);
         }
 
         // Send payload with the updated stored damage and ticks to start/refresh the visual
@@ -320,7 +344,6 @@ public class CosmicPower implements PowerInterface {
 
         if (fate == null || fate.timerTicks <= 0 || fate.detonateTicks > 0 || fate.immuneTicks > 0) return;
 
-        // FIXED: Math.max(1, ...) prevents it freezing at 0, allowing onTick to detonate it naturally
         fate.timerTicks = Math.max(1, fate.timerTicks - Math.round(fate.timerTicks * reduction));
 
         // Notify clients of the timer deduction so the particles stay perfectly synced
@@ -339,7 +362,6 @@ public class CosmicPower implements PowerInterface {
 
         if (fate == null || fate.timerTicks <= 0 || fate.detonateTicks > 0 || fate.immuneTicks > 0) return;
 
-        // Flat drain per tick makes it visually fast-forward rather than popping instantly
         fate.timerTicks = Math.max(1, fate.timerTicks - BH_TIMER_REDUCTION);
 
         PacketDistributor.sendToPlayersTrackingEntityAndSelf(target, new FateAuraPayload(target.getId(), fate.storedDamage, fate.timerTicks));

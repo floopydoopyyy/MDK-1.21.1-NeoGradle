@@ -180,6 +180,7 @@ public class StrengthPower implements PowerInterface {
                 Vec3 dir = attacker.getViewVector(1.0f).normalize();
                 target.setDeltaMovement(dir.x * 25.0, 4.0, dir.z * 25.0);
                 target.hasImpulse = true;
+                target.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
                 if (target instanceof ServerPlayer spTarget) {
                     spTarget.connection.send(new ClientboundSetEntityMotionPacket(spTarget));
@@ -221,6 +222,7 @@ public class StrengthPower implements PowerInterface {
         Vec3 tv = target.getDeltaMovement();
         target.setDeltaMovement(tv.x, Math.min(maxUp, Math.max(tv.y, 0.06)), tv.z);
         target.hasImpulse = true;
+        target.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
         if (target instanceof ServerPlayer sp) {
             sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
@@ -355,6 +357,7 @@ public class StrengthPower implements PowerInterface {
             Vec3 v = t.getDeltaMovement();
             t.setDeltaMovement(v.x + dir.x * out, Math.max(v.y, up), v.z + dir.z * out);
             t.hasImpulse = true;
+            t.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
             if (t instanceof ServerPlayer sp) {
                 sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
@@ -498,6 +501,7 @@ public class StrengthPower implements PowerInterface {
 
         player.setDeltaMovement(v.x, newY, v.z);
         player.hasImpulse = true;
+        player.hurtMarked = true;
         player.connection.send(new ClientboundSetEntityMotionPacket(player));
     }
 
@@ -668,6 +672,7 @@ public class StrengthPower implements PowerInterface {
                     Vec3 tv = t.getDeltaMovement();
                     t.setDeltaMovement(tv.x, Math.max(tv.y, RUSH_HIT_KNOCKUP), tv.z);
                     t.hasImpulse = true;
+                    t.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
                     if (t instanceof ServerPlayer sp) {
                         sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
@@ -727,6 +732,7 @@ public class StrengthPower implements PowerInterface {
 
         player.setDeltaMovement(0, player.getDeltaMovement().y * 0.25, 0);
         player.hasImpulse = true;
+        player.hurtMarked = true;
         player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
         Vec3 impact = wallHit.getLocation();
@@ -796,6 +802,7 @@ public class StrengthPower implements PowerInterface {
             Vec3 tv = t.getDeltaMovement();
             t.setDeltaMovement(tv.x, Math.max(tv.y, 0.65), tv.z);
             t.hasImpulse = true;
+            t.hurtMarked = true; // sync velocity to all tracking clients, not just ServerPlayers
 
             if (t instanceof ServerPlayer sp) {
                 sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
@@ -838,6 +845,8 @@ public class StrengthPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         player.setDeltaMovement(v.x, Math.max(v.y, 0.52), v.z);
         player.hasImpulse = true;
+        player.hurtMarked = true;
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
 
         return true;
     }
@@ -893,11 +902,11 @@ public class StrengthPower implements PowerInterface {
         if (state.rageAuraStep <= 0) {
             state.rageAuraStep = RAGE_AURA_INTERVAL;
 
-                // FX - Client Dispatch (Enhanced Scary Aura handled on client)
-                PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
-                        StrengthParticlePayload.RAGE_TICK, player.getX(), player.getY(), player.getZ(), 0, 0, 0, 0, false
-                ));
-            }
+            // FX - Client Dispatch (Enhanced Scary Aura handled on client)
+            PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new StrengthParticlePayload(
+                    StrengthParticlePayload.RAGE_TICK, player.getX(), player.getY(), player.getZ(), 0, 0, 0, 0, false
+            ));
+        }
         else {
             state.rageAuraStep--;
         }

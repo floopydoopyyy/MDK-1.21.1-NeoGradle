@@ -40,6 +40,21 @@ import java.util.UUID;
 public class ExplosionPower implements PowerInterface {
 
     /* ============================================================
+       NETWORK SYNC HELPER
+       ============================================================ */
+
+    /**
+     * Call this immediately AFTER modifying a target's DeltaMovement to force
+     * the client to accept the physics and prevent rubber-banding.
+     */
+    public static void syncPlayerMotion(LivingEntity entity) {
+        if (entity instanceof ServerPlayer sp) {
+            sp.hurtMarked = true;
+            sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
+        }
+    }
+
+    /* ============================================================
        STATE STORAGE (OPTIMIZED)
        ============================================================ */
 
@@ -297,9 +312,8 @@ public class ExplosionPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         player.setDeltaMovement(v.x, Math.max(v.y, 0.65), v.z);
         player.hasImpulse = true;
-        player.hurtMarked = true;
-        player.connection.send(new ClientboundSetEntityMotionPacket(player));
         player.fallDistance = 0.0f;
+        syncPlayerMotion(player);
 
         CameraShake.shakeNearby(player, 9.0, 16, 1.4f);
     }
@@ -425,9 +439,8 @@ public class ExplosionPower implements PowerInterface {
 
         player.setDeltaMovement(nx, ny, nz);
         player.hasImpulse = true;
-        player.hurtMarked = true;
-        player.connection.send(new ClientboundSetEntityMotionPacket(player));
         player.fallDistance = 0.0f;
+        syncPlayerMotion(player);
     }
 
     private static void updateBlastCooldownUI(ServerPlayer player, ExplosionState state) {
@@ -561,8 +574,7 @@ public class ExplosionPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         player.setDeltaMovement(v.x * 0.5, v.y * 0.2, v.z * 0.5);
         player.hasImpulse = true;
-        player.hurtMarked = true;
-        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+        syncPlayerMotion(player);
     }
 
     private static void doUltPop(ServerPlayer player, ExplosionState state, boolean finisher, int popIndex) {
@@ -605,9 +617,8 @@ public class ExplosionPower implements PowerInterface {
 
         player.setDeltaMovement(vNow.x, Math.max(vNow.y, !player.onGround() ? ULT_LAUNCH_KICK_Y * 0.5 : ULT_LAUNCH_KICK_Y), vNow.z);
         player.hasImpulse = true;
-        player.hurtMarked = true;
         player.fallDistance = 0.0f;
-        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+        syncPlayerMotion(player);
 
         scheduleLaunch(state, targetX, targetY, targetZ);
 
@@ -678,8 +689,7 @@ public class ExplosionPower implements PowerInterface {
         Vec3 v = player.getDeltaMovement();
         player.setDeltaMovement(v.x * 0.2, v.y, v.z * 0.2);
         player.hasImpulse = true;
-        player.hurtMarked = true;
-        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+        syncPlayerMotion(player);
     }
 
     private static boolean isShieldBlockingExplosion(ServerPlayer sp, Vec3 center) {
@@ -818,12 +828,7 @@ public class ExplosionPower implements PowerInterface {
                 Vec3 dir = horiz.normalize();
                 e.setDeltaMovement(e.getDeltaMovement().add(dir.x * (0.25 * t) * knockMul, 0.08 * t * knockMul, dir.z * (0.25 * t) * knockMul));
                 e.hasImpulse = true;
-
-                // Sync velocity for other players hit by explosions
-                if (e instanceof ServerPlayer targetPlayer) {
-                    targetPlayer.hurtMarked = true;
-                    targetPlayer.connection.send(new ClientboundSetEntityMotionPacket(targetPlayer));
-                }
+                syncPlayerMotion(e);
             }
         }
     }
@@ -842,16 +847,14 @@ public class ExplosionPower implements PowerInterface {
             Vec3 v = player.getDeltaMovement();
             player.setDeltaMovement(v.x, Math.max(v.y, ULT_LAUNCH_KICK_Y), v.z);
             player.hasImpulse = true;
-            player.hurtMarked = true;
-            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            syncPlayerMotion(player);
             return;
         }
 
         if (state.ultLaunchDelayTicks == 0) {
             player.setDeltaMovement(state.launchX, state.launchY, state.launchZ);
             player.hasImpulse = true;
-            player.hurtMarked = true;
-            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            syncPlayerMotion(player);
         }
     }
 

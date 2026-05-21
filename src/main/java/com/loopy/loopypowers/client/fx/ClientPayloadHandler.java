@@ -5,6 +5,7 @@ import com.loopy.loopypowers.network.payload.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 public class ClientPayloadHandler {
@@ -442,5 +443,16 @@ public class ClientPayloadHandler {
         context.enqueueWork(() ->
                 TelekinesisFxClient.onParticleEvent(payload)
         );
+    }
+
+    public static void handleElementalRitual(final ElementalRitualTickPayload payload, final IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() != null && context.player().level() != null) {
+                Entity entity = context.player().level().getEntity(payload.entityId());
+                if (entity instanceof Player player) {
+                    ElementalRitualClient.tick(player.level(), player, payload.ticks());
+                }
+            }
+        });
     }
 }

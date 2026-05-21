@@ -312,7 +312,7 @@ public class FirePower implements PowerInterface {
             entity.setDeltaMovement(entity.getDeltaMovement()
                     .add(dir.x * SECONDARY_KB_HORIZONTAL, SECONDARY_KB_VERTICAL, dir.z * SECONDARY_KB_HORIZONTAL));
             entity.hasImpulse = true;
-            if (entity instanceof ServerPlayer sp) sp.hurtMarked = true;
+            entity.hurtMarked  = true; // explicit sync; don't rely solely on hurt() setting this
 
             entity.hurt(explosionSource, SECONDARY_EXPLOSION_DAMAGE);
             entity.igniteForSeconds(SECONDARY_FIRE_DURATION);
@@ -435,8 +435,7 @@ public class FirePower implements PowerInterface {
                     dir.z * strength
             ));
             entity.hasImpulse = true;
-
-            if (entity instanceof ServerPlayer pulled) pulled.hurtMarked = true;
+            entity.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
         }
     }
 

@@ -258,10 +258,6 @@ public class LightningPower implements PowerInterface {
                 ModSounds.SHOCK.get(),
                 attacker.getSoundSource(), 0.9f, 1.00f);
 
-        // Stun
-        if (tier >= 3) {
-            target.addEffect(new MobEffectInstance(ModEffects.STUN, STUN_TICKS, STUN_AMP, true, true));
-        }
         // chain stuff
         if (tier >= 4) {
             LivingEntity current = target;
@@ -369,7 +365,7 @@ public class LightningPower implements PowerInterface {
 
     // Stun target
     private static final int STUN_TICKS = 20;   // 1 second
-    private static final int STUN_AMP   = 1;    // slowness/weakness amplifier
+    private static final int STUN_AMP   = 0;    // slowness/weakness amplifier
 
     private static void spawnChainTrail(ServerLevel world, Vec3 from, Vec3 to) { //blink code but new font
         Vec3 delta = to.subtract(from); // draws a line between two areas
@@ -494,9 +490,9 @@ public class LightningPower implements PowerInterface {
     }
 
     // ULT
-    private static final double STORM_RADIUS        = 15.0;
+    private static final double STORM_RADIUS        = 13.0;
     private static final int    STORM_DURATION_TICKS = 300;  // 15 seconds
-    private static final int    STORM_PULSE_TICKS    = 17;   // every 30 ticks
+    private static final int    STORM_PULSE_TICKS    = 19;   // every 30 ticks
 
     private static final float STORM_DAMAGE     = 4.5f;
 

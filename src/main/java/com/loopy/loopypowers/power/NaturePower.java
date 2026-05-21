@@ -772,8 +772,9 @@ public class NaturePower implements PowerInterface {
 
                 le.setDeltaMovement(le.getDeltaMovement().add(nx * pull, 0.0, nz * pull));
                 le.hasImpulse = true;
+                le.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
 
-                // for players, force sync so it feels consistent
+                // for players, also force an immediate same-tick packet
                 if (le instanceof ServerPlayer sp) {
                     sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                     sp.setSprinting(false);

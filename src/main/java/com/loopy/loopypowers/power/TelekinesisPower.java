@@ -4,6 +4,8 @@ import com.loopy.loopypowers.damage.ModDamageTypes;
 import com.loopy.loopypowers.manager.PassiveManager;
 import com.loopy.loopypowers.sound.ModSounds;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
@@ -117,7 +119,8 @@ public class TelekinesisPower implements PowerInterface {
     private static final int    CHOKE_TICKS           = 60;
     private static final int    CHOKE_DAMAGE_INTERVAL = 10;
     private static final float  CHOKE_DAMAGE_PER_TICK = 2.0f;
-    private static final double CHOKE_SQUEEZE_VEL     = -0.01;
+    private static final double CHOKE_ENTRY_LIFT       = 0.28;  // upward boost applied on the very first choke tick
+    private static final double CHOKE_HOVER_VEL        = 0.06;  // per-tick y velocity to counteract gravity and hold position
 
     // EGG
     private static final int    QUOTE_CHANCE           = 450;
@@ -314,6 +317,8 @@ public class TelekinesisPower implements PowerInterface {
         Vec3 look = attacker.getViewVector(1.0f);
         target.setDeltaMovement(target.getDeltaMovement().add(look.x * PASSIVE_KB_MULT, PASSIVE_KB_VERTICAL, look.z * PASSIVE_KB_MULT));
         target.hasImpulse = true;
+        target.hurtMarked = true; // sync velocity to all tracking clients
+        if (target instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
         markForImpactTracking(target, target.getDeltaMovement(), attacker.getUUID());
 
@@ -412,6 +417,8 @@ public class TelekinesisPower implements PowerInterface {
             Vec3 launchVel = e.getDeltaMovement().add(pull.x, pull.y + YANK_VERTICAL, pull.z);
             e.setDeltaMovement(launchVel);
             e.hasImpulse = true;
+            e.hurtMarked = true; // sync yank velocity to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
             markForImpactTracking(e, launchVel, player.getUUID());
 
@@ -478,6 +485,8 @@ public class TelekinesisPower implements PowerInterface {
             vState.suspendTicks--;
             e.setDeltaMovement(e.getDeltaMovement().x * 0.3, SUSPEND_FLOAT_VEL, e.getDeltaMovement().z * 0.3);
             e.hasImpulse = true;
+            e.hurtMarked = true; // sync per-tick suspend float to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
             e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 5, 4, true, false, false));
 
             PacketDistributor.sendToPlayersTrackingEntityAndSelf(e, new TelekinesisParticlePayload(
@@ -501,10 +510,14 @@ public class TelekinesisPower implements PowerInterface {
         }
 
         if (vState.chokeTicks > 0) {
+            boolean chokeEntry = (vState.chokeTicks == CHOKE_TICKS);
             vState.chokeTicks--;
             float chokeProgress = 1.0f - ((float) vState.chokeTicks / CHOKE_TICKS);
-            e.setDeltaMovement(e.getDeltaMovement().x * 0.2, CHOKE_SQUEEZE_VEL + chokeProgress * 0.10, e.getDeltaMovement().z * 0.2);
+            double newY = chokeEntry ? CHOKE_ENTRY_LIFT : CHOKE_HOVER_VEL;
+            e.setDeltaMovement(e.getDeltaMovement().x * 0.2, newY, e.getDeltaMovement().z * 0.2);
             e.hasImpulse = true;
+            e.hurtMarked = true; // sync per-tick choke hover to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
             if (e.tickCount % CHOKE_DAMAGE_INTERVAL == 0) {
                 Entity attacker = resolveOwner(vState.suspendOwner, world);
@@ -549,6 +562,8 @@ public class TelekinesisPower implements PowerInterface {
 
                     le.setDeltaMovement(throwVel);
                     le.hasImpulse = true;
+                    le.hurtMarked = true; // sync throw velocity to all tracking clients
+                    if (le instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
                     markForImpactTracking(le, throwVel, player.getUUID());
 
@@ -744,8 +759,13 @@ public class TelekinesisPower implements PowerInterface {
             Vec3 target = new Vec3(x, y, z);
             ent.setDeltaMovement(target.subtract(ent.position()).scale(0.35));
             ent.hasImpulse = true;
+            ent.hurtMarked = true; // sync per-tick orbit velocity to tracking clients
 
-            if (target.distanceTo(ent.position()) > 5.0) ent.setPos(target.x, target.y, target.z);
+            if (target.distanceTo(ent.position()) > 5.0) {
+                ent.setPos(target.x, target.y, target.z);
+                // broadcast position snap so clients don't see blocks rubber-banding
+                world.getChunkSource().broadcastAndSend(ent, new ClientboundTeleportEntityPacket(ent));
+            }
 
             ent.setNoGravity(true);
             if (ent instanceof FallingBlockEntity fb) fb.time = -32768;
@@ -772,6 +792,8 @@ public class TelekinesisPower implements PowerInterface {
 
             e.setDeltaMovement(e.getDeltaMovement().add(pull.x, pull.y * 0.3, pull.z));
             e.hasImpulse = true;
+            e.hurtMarked = true; // sync per-tick pull velocity to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
             if (dist <= contactRadius && world.getGameTime() % 10 == 0) {
                 e.hurt(ModDamageTypes.debrisOrbit(world, player), DEBRIS_PULL_DAMAGE);
@@ -916,6 +938,8 @@ public class TelekinesisPower implements PowerInterface {
             Vec3 knockback = e.position().subtract(pos).normalize().scale(0.8);
             e.setDeltaMovement(e.getDeltaMovement().add(knockback.x, 0.4, knockback.z));
             e.hasImpulse = true;
+            e.hurtMarked = true; // sync explosion knockback to all tracking clients
+            if (e instanceof ServerPlayer sp) sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
 
             markForImpactTracking(e, e.getDeltaMovement(), player.getUUID());
         }

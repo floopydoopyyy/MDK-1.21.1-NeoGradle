@@ -1174,10 +1174,9 @@ public class FortunePower implements PowerInterface {
 
             e.setDeltaMovement(e.getDeltaMovement().add(sx, up, sz));
             e.hasImpulse = true;
+            e.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
 
-            // sync
             if (e instanceof ServerPlayer sp) {
-                sp.hurtMarked = true;
                 sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
             }
 
@@ -1601,6 +1600,7 @@ public class FortunePower implements PowerInterface {
             e.moveTo(pos.x, pos.y, pos.z, yaw, pitch);
             e.setDeltaMovement(Vec3.ZERO);
             e.hasImpulse = true;
+            e.hurtMarked  = true; // sync zeroed velocity to tracking clients
         }
     }
 
@@ -1693,10 +1693,9 @@ public class FortunePower implements PowerInterface {
 
                 le.setDeltaMovement(le.getDeltaMovement().add(push.x, 0.2, push.z));
                 le.hasImpulse = true;
+                le.hurtMarked  = true; // sync velocity to all tracking clients, not just ServerPlayers
 
-                // FIX: Sync wall bounce velocity to client
                 if (le instanceof ServerPlayer sp) {
-                    sp.hurtMarked = true;
                     sp.connection.send(new ClientboundSetEntityMotionPacket(sp));
                 }
 

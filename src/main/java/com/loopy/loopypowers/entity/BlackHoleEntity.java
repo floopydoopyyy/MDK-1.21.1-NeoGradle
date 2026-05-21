@@ -8,6 +8,7 @@ import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
@@ -198,6 +199,10 @@ public class BlackHoleEntity extends Entity {
         }
 
         entity.setDeltaMovement(newVel);
+        if (entity instanceof ServerPlayer spTarget) {
+            spTarget.hurtMarked = true;
+            spTarget.connection.send(new ClientboundSetEntityMotionPacket(spTarget));
+        }
         entity.hasImpulse = true;
 
         if (entity.level() instanceof ServerLevel sw) {

@@ -14,6 +14,7 @@ import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
@@ -415,6 +416,10 @@ public class DimensionalPower implements PowerInterface {
             Vec3 finalVelocity = pull.add(knockback).add(0, EXIT_VERTICAL_BOOST, 0);
 
             e.push(finalVelocity.x, finalVelocity.y, finalVelocity.z);
+            if (e instanceof ServerPlayer spTarget) {
+                spTarget.hurtMarked = true;
+                spTarget.connection.send(new ClientboundSetEntityMotionPacket(spTarget));
+            }
             e.hasImpulse = true;
         }
 
@@ -870,7 +875,7 @@ public class DimensionalPower implements PowerInterface {
        STUFF
        ============================================================ */
 
-    @Override public String getName() { return "power.loopypowers.interdimensional.name"; }
+    @Override public String getName() { return Component.translatable("power.loopypowers.interdimensional.name").getString(); }
 
     @Override public String getPassiveName()   { return Component.translatable("power.loopypowers.interdimensional.passive_name").getString(); }
     @Override public String getPrimaryName()   { return Component.translatable("power.loopypowers.interdimensional.primary_name").getString(); }

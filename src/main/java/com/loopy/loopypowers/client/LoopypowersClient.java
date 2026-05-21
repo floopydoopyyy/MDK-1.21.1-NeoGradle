@@ -172,6 +172,8 @@ public class LoopypowersClient {
             registrar.playToClient(TeleportParticlePayload.TYPE, TeleportParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleTeleportParticles);
             // telekinesis
             registrar.playToClient(TelekinesisParticlePayload.TYPE, TelekinesisParticlePayload.STREAM_CODEC, ClientPayloadHandler::handleTelekinesisParticles);
+            // ritual
+            registrar.playToClient(ElementalRitualTickPayload.TYPE, ElementalRitualTickPayload.STREAM_CODEC, ClientPayloadHandler::handleElementalRitual);
         }
     }
 
