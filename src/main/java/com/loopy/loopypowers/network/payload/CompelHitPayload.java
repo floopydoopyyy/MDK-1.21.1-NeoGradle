@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -21,7 +22,7 @@ public record CompelHitPayload(int targetEntityId, int life) implements CustomPa
             );
 
     static {
-        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {}));
+        ClientPayloadRegistry.add(TYPE, CODEC, ClientPayloadHandler::handleCompelHit);
     }
 
     @Override

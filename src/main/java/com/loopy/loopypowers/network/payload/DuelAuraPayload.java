@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -16,7 +17,7 @@ public record DuelAuraPayload(int entityId) implements CustomPacketPayload {
     );
 
     static {
-        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+        ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleDuelAura);
     }
 
     @Override

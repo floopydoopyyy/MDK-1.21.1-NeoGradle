@@ -597,6 +597,7 @@ public class FortunePower implements PowerInterface {
     private static final int HOUSE_ACTIVE_TICKS = 298;
     private static final int HOUSE_CLEAR_HEIGHT = 10;
     private static final int HOUSE_MAX_RULES = 4;
+    private static final int HOUSE_TELEPORT_HEIGHT_ALLOWANCE = 14;
 
     // Roof particles
     private static final int HOUSE_ROOF_FX_EVERY_TICKS = 2;
@@ -1712,7 +1713,7 @@ public class FortunePower implements PowerInterface {
                 }
             }
             // yank if too far central
-            else if (maxDist > (HOUSE_RADIUS + 2.0) || le.getY() > st.baseY + HOUSE_WALL_LAYERS + 2 || le.getY() < st.baseY - 1) {
+            else if (maxDist > (HOUSE_RADIUS + 2.0) || le.getY() > st.baseY + HOUSE_WALL_LAYERS + HOUSE_TELEPORT_HEIGHT_ALLOWANCE || le.getY() < st.baseY - 1) {
                 teleportEntity(w, le, center, le.getYRot(), le.getXRot());
                 w.playSound(null, le.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 1.0f, 1.2f);
                 w.sendParticles(ParticleTypes.ENCHANTED_HIT, le.getX(), le.getY() + 1.0, le.getZ(), 30, 0.5, 0.5, 0.5, 0.05);

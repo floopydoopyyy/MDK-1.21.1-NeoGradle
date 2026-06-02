@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,6 +12,6 @@ public record IceBlizzardPayload(int entityId, int ultTick) implements CustomPac
     public static final StreamCodec<FriendlyByteBuf, IceBlizzardPayload> STREAM_CODEC = StreamCodec.of(
             (buf, p) -> { buf.writeInt(p.entityId()); buf.writeInt(p.ultTick()); },
             buf -> new IceBlizzardPayload(buf.readInt(), buf.readInt()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleIceBlizzard); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

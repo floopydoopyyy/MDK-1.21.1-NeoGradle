@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -32,7 +33,7 @@ public record TelekinesisParticlePayload(int eventId, int entityId, double x, do
     }
 
     static {
-        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+        ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleTelekinesisParticles);
     }
 
     @Override

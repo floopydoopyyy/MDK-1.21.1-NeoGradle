@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -12,6 +13,6 @@ public record NatureTetherFxPayload(Vec3 from, Vec3 to, int seed) implements Cus
     public static final StreamCodec<FriendlyByteBuf, NatureTetherFxPayload> STREAM_CODEC = StreamCodec.of(
             (buf, p) -> { buf.writeVec3(p.from()); buf.writeVec3(p.to()); buf.writeInt(p.seed()); },
             buf -> new NatureTetherFxPayload(buf.readVec3(), buf.readVec3(), buf.readInt()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleNatureTetherFx); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

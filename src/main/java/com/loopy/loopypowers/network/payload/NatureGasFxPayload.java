@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -12,6 +13,6 @@ public record NatureGasFxPayload(Vec3 center, float radius, float halfHeight, in
     public static final StreamCodec<FriendlyByteBuf, NatureGasFxPayload> STREAM_CODEC = StreamCodec.of(
             (buf, p) -> { buf.writeVec3(p.center()); buf.writeFloat(p.radius()); buf.writeFloat(p.halfHeight()); buf.writeInt(p.count()); buf.writeInt(p.seed()); },
             buf -> new NatureGasFxPayload(buf.readVec3(), buf.readFloat(), buf.readFloat(), buf.readInt(), buf.readInt()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleNatureGasFx); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

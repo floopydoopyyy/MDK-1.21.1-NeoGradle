@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -18,7 +19,7 @@ public record FireUltPayload(int ownerId, boolean active) implements CustomPacke
     );
 
     static {
-        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+        ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleFireUltFx);
     }
 
     @Override

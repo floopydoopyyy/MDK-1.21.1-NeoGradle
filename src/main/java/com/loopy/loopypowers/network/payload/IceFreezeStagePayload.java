@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,6 +12,6 @@ public record IceFreezeStagePayload(int entityId, int stage, long gameTime) impl
     public static final StreamCodec<FriendlyByteBuf, IceFreezeStagePayload> STREAM_CODEC = StreamCodec.of(
             (buf, p) -> { buf.writeInt(p.entityId()); buf.writeByte(p.stage()); buf.writeLong(p.gameTime()); },
             buf -> new IceFreezeStagePayload(buf.readInt(), buf.readByte(), buf.readLong()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, STREAM_CODEC, ClientPayloadHandler::handleIceFreezeStage); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

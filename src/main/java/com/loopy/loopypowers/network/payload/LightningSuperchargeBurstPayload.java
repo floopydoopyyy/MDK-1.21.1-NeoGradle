@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,6 +12,6 @@ public record LightningSuperchargeBurstPayload(int entityId) implements CustomPa
     public static final StreamCodec<FriendlyByteBuf, LightningSuperchargeBurstPayload> CODEC = StreamCodec.of(
             (buf, p) -> buf.writeVarInt(p.entityId()),
             buf -> new LightningSuperchargeBurstPayload(buf.readVarInt()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, CODEC, ClientPayloadHandler::handleLightningSuperchargeBurst); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

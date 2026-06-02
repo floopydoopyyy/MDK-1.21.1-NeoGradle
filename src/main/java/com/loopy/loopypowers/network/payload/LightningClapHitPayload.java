@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.client.fx.ClientPayloadHandler;
 import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,6 +12,6 @@ public record LightningClapHitPayload(int targetId, float t, boolean isParty) im
     public static final StreamCodec<FriendlyByteBuf, LightningClapHitPayload> CODEC = StreamCodec.of(
             (buf, p) -> { buf.writeVarInt(p.targetId()); buf.writeFloat(p.t()); buf.writeBoolean(p.isParty()); },
             buf -> new LightningClapHitPayload(buf.readVarInt(), buf.readFloat(), buf.readBoolean()));
-    static { ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {})); }
+    static { ClientPayloadRegistry.add(TYPE, CODEC, ClientPayloadHandler::handleLightningClapHit); }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }
