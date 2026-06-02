@@ -55,9 +55,6 @@ public class PowerManager {
 
     /* ============================================================
        ATTACHMENT HELPER
-       Replaces the old PLAYER_POWERS, PLAYER_LEVELS, and PLAYER_CD_MULT
-       static HashMaps. Data now lives in the player entity's own NBT,
-       so it is automatically scoped to the current world save.
        ============================================================ */
 
     /** Returns the attachment for this player, creating it with defaults if absent. */
@@ -127,10 +124,13 @@ public class PowerManager {
 
     /* ============================================================
        COOLDOWNS
-       In-memory only — intentionally transient (reset on server restart).
+       Persisted in the PlayerPowerData attachment so they survive
+       world reloads. The static map below is a fast in-memory cache;
+       the attachment is the source of truth written to NBT on logout.
        ============================================================ */
 
-    /** UUID → (abilityKey → epoch-ms when cooldown expires) */
+    /** Fast in-memory cache: UUID → (abilityKey → epoch-ms expiry).
+     *  Populated from the attachment on login, written back on every change. */
     private static final Map<UUID, Map<String, Long>> COOLDOWN_END_MS = new HashMap<>();
 
     private static final Map<String, Long> COOLDOWN_OVERRIDE_MS = new HashMap<>();
@@ -139,6 +139,19 @@ public class PowerManager {
     private static boolean COOLDOWNS_DISABLED = false;
 
     private static long nowMs() { return System.currentTimeMillis(); }
+
+    /** Writes a cooldown to both the in-memory cache and the persistent attachment. */
+    private static void putCooldown(ServerPlayer player, String key, long endMs) {
+        COOLDOWN_END_MS.computeIfAbsent(player.getUUID(), u -> new HashMap<>()).put(key, endMs);
+        data(player).putCooldown(key, endMs);
+    }
+
+    /** Removes a cooldown from both the cache and the attachment. */
+    private static void dropCooldown(ServerPlayer player, String key) {
+        Map<String, Long> map = COOLDOWN_END_MS.get(player.getUUID());
+        if (map != null) map.remove(key);
+        data(player).removeCooldown(key);
+    }
 
     private static long getCooldownEndMs(ServerPlayer player, String key) {
         Map<String, Long> map = COOLDOWN_END_MS.get(player.getUUID());
@@ -159,18 +172,18 @@ public class PowerManager {
         if (durationMs <= 0L) { clearCooldown(player, key); return; }
 
         long end = nowMs() + durationMs;
-        COOLDOWN_END_MS.computeIfAbsent(player.getUUID(), u -> new HashMap<>()).put(key, end);
+        putCooldown(player, key, end);
         CooldownUI.setCooldownEnd(player, key, end, (Component) null);
     }
 
     public static void clearCooldown(ServerPlayer player, String key) {
-        Map<String, Long> map = COOLDOWN_END_MS.get(player.getUUID());
-        if (map != null) map.remove(key);
+        dropCooldown(player, key);
         CooldownUI.clearCooldown(player, key);
     }
 
     public static void clearAllCooldowns(ServerPlayer player) {
         COOLDOWN_END_MS.remove(player.getUUID());
+        data(player).clearCooldowns();
         CooldownUI.clearAllCooldowns(player);
     }
 
@@ -200,6 +213,7 @@ public class PowerManager {
 
             long newEnd = Math.max(now, currentEnd - amountMs);
             entry.setValue(newEnd);
+            data(player).putCooldown(entry.getKey(), newEnd);
             CooldownUI.setCooldownEnd(player, entry.getKey(), newEnd, (Component) null);
         }
     }
@@ -216,7 +230,7 @@ public class PowerManager {
         if (currentEnd <= now) return;
 
         long newEnd = Math.max(now, currentEnd - amountMs);
-        map.put(key, newEnd);
+        putCooldown(player, key, newEnd);
         CooldownUI.setCooldownEnd(player, key, newEnd, (Component) null);
     }
 
@@ -414,6 +428,22 @@ public class PowerManager {
     public static void onPlayerLoad(ServerPlayer player) {
         checkLoadGlobalState(player.getServer());
 
+        // Restore persisted cooldowns from attachment into the in-memory cache.
+        // Expired entries were already stripped during deserializeNBT so we
+        // don't need to filter here.
+        PlayerPowerData pd = data(player);
+        Map<String, Long> stored = pd.getCooldownEndMs();
+        if (!stored.isEmpty()) {
+            COOLDOWN_END_MS.put(player.getUUID(), new HashMap<>(stored));
+            // Sync each active cooldown to the HUD
+            long now = nowMs();
+            for (Map.Entry<String, Long> e : stored.entrySet()) {
+                if (e.getValue() > now) {
+                    CooldownUI.setCooldownEnd(player, e.getKey(), e.getValue(), (Component) null);
+                }
+            }
+        }
+
         // Re-apply the power's passive effects now that the player entity exists.
         PowerInterface power = getPower(player);
         if (power != null) {
@@ -422,16 +452,37 @@ public class PowerManager {
         }
 
         // Restore passive toggle state into PassiveManager's in-memory tracking.
-        PassiveManager.setPassiveState(player, data(player).isPassive());
+        PassiveManager.setPassiveState(player, pd.isPassive());
     }
 
     public static void copyCooldowns(ServerPlayer oldPlayer, ServerPlayer newPlayer) {
         Map<String, Long> oldMap = COOLDOWN_END_MS.get(oldPlayer.getUUID());
         if (oldMap == null) return;
-        COOLDOWN_END_MS.put(newPlayer.getUUID(), new HashMap<>(oldMap));
+        Map<String, Long> copy = new HashMap<>(oldMap);
+        COOLDOWN_END_MS.put(newPlayer.getUUID(), copy);
+        // Mirror into the attachment so they persist on the new entity too
+        PlayerPowerData newData = data(newPlayer);
+        newData.clearCooldowns();
+        copy.forEach(newData::putCooldown);
     }
 
+    /**
+     * Clears only in-memory runtime state on disconnect.
+     * Power, level, cd multiplier, and passive toggle are preserved.
+     * Cooldowns are intentionally left in the attachment so they
+     * survive the reload — the cache is repopulated in onPlayerLoad.
+     */
     public static void clearPlayerState(ServerPlayer player) {
+        COOLDOWN_END_MS.remove(player.getUUID());
+        PassiveManager.setPassiveState(player, true);
+    }
+
+    /**
+     * Fully strips a player's power and resets all persistent data.
+     * Use this when you intentionally want to remove someone's power
+     * (e.g. admin command, ritual reset). NOT called on disconnect.
+     */
+    public static void fullResetPlayer(ServerPlayer player) {
         PowerInterface current = getPower(player);
         if (current != null) current.onRemove(player);
 
@@ -439,8 +490,10 @@ public class PowerManager {
         data(player).setLevel(1);
         data(player).setCdMult(1.0);
         data(player).setPassive(true);
+        data(player).clearCooldowns();
 
         COOLDOWN_END_MS.remove(player.getUUID());
+        CooldownUI.clearAllCooldowns(player);
         PassiveManager.setPassiveState(player, true);
     }
 
