@@ -154,7 +154,7 @@ public class IcePower implements PowerInterface {
     private static final int FRZ_DECAY_POINTS_STEP = 5;
     private static final int FRZ_IMMUNE_TICKS      = 100;
     private static final float SHATTER_BONUS_DAMAGE = 12.0f;
-    private static final int FRZ_POINTS_MELEE      = 7;
+    private static final int FRZ_POINTS_MELEE      = 10;
 
     private static final Map<ResourceKey<Level>, Long> FROZEN_LAST_TICK = new HashMap<>();
 
