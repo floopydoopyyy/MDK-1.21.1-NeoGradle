@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -24,9 +25,11 @@ public record SoundBassPulsePayload(
     }
 
     private static SoundBassPulsePayload decode(FriendlyByteBuf buf) {
-        return new SoundBassPulsePayload(
-                buf.readVec3()
-        );
+        return new SoundBassPulsePayload(buf.readVec3());
+    }
+
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
 
     @Override

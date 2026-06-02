@@ -1,13 +1,11 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
-/**
- * Sent every tick to render the Compel aura particles on a target.
- */
 public record CompelAuraPayload(int entityId) implements CustomPacketPayload {
 
     public static final Type<CompelAuraPayload> TYPE =
@@ -19,8 +17,10 @@ public record CompelAuraPayload(int entityId) implements CustomPacketPayload {
                     buf -> new CompelAuraPayload(buf.readVarInt())
             );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

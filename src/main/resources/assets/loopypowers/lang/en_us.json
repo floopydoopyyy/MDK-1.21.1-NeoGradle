@@ -284,7 +284,7 @@
 
   "item.loopypowers.celestial_shard.tooltip.flavor": "It emits a powerful aura...",
   "item.loopypowers.celestial_shard.tooltip.info": "Used in power-related crafting recipes.",
-  "block.loopypowers.celestial_block.tooltip.flavor": "You feel your power grow just by holding it.",
+  "block.loopypowers.celestial_block.tooltip.flavor": "You can feel the power coming off it.",
   "block.loopypowers.celestial_block.tooltip.info": "Standing on it increases cooldown recovery speed.",
   "item.loopypowers.empty_vestige.tooltip.flavor": "Built to hold something powerful.",
   "item.loopypowers.empty_vestige.tooltip.info": "Imbue it with celestial shards to unlock its potential.",

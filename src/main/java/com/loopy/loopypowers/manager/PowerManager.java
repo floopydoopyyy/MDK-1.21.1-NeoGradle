@@ -15,7 +15,12 @@ import java.util.*;
 
 /**
  * Assigns powers to players and manages abilities.
- * Cooldowns are managed by CooldownUI; persistence is handled by PlayerDataStore.
+ * Cooldowns are managed by CooldownUI; persistence is handled via NeoForge
+ * entity attachments (ModAttachments.POWER_DATA), which automatically scope
+ * player data per-world-save instead of leaking across saves via static maps.
+ *
+ * Global server state (cooldown toggles/multipliers) is still persisted by
+ * PlayerDataStore as before.
  */
 public class PowerManager {
 
@@ -23,23 +28,23 @@ public class PowerManager {
        POWER REGISTRY
        ============================================================ */
 
-    private static final PowerInterface SPEED           = new SpeedPower();
-    private static final PowerInterface FIRE            = new FirePower();
-    private static final PowerInterface TELEPORT        = new TeleportPower();
-    private static final PowerInterface LIGHTNING       = new LightningPower();
-    private static final PowerInterface FLIGHT          = new FlightPower();
-    private static final PowerInterface BLOOD           = new BloodPower();
-    private static final PowerInterface SOUND           = new SoundPower();
-    private static final PowerInterface STRENGTH        = new StrengthPower();
-    private static final PowerInterface EXPLOSION       = new ExplosionPower();
-    private static final PowerInterface NATURE          = new NaturePower();
-    private static final PowerInterface ICE             = new IcePower();
-    private static final PowerInterface FORTUNE         = new FortunePower();
-    private static final PowerInterface DARKNESS        = new DarknessPower();
-    private static final PowerInterface HEALING_FACTOR  = new HealingPower();
-    private static final PowerInterface PSYCHIC         = new PsychicPower();
-    private static final PowerInterface COSMIC          = new CosmicPower();
-    private static final PowerInterface TELEKINESIS     = new TelekinesisPower();
+    private static final PowerInterface SPEED            = new SpeedPower();
+    private static final PowerInterface FIRE             = new FirePower();
+    private static final PowerInterface TELEPORT         = new TeleportPower();
+    private static final PowerInterface LIGHTNING        = new LightningPower();
+    private static final PowerInterface FLIGHT           = new FlightPower();
+    private static final PowerInterface BLOOD            = new BloodPower();
+    private static final PowerInterface SOUND            = new SoundPower();
+    private static final PowerInterface STRENGTH         = new StrengthPower();
+    private static final PowerInterface EXPLOSION        = new ExplosionPower();
+    private static final PowerInterface NATURE           = new NaturePower();
+    private static final PowerInterface ICE              = new IcePower();
+    private static final PowerInterface FORTUNE          = new FortunePower();
+    private static final PowerInterface DARKNESS         = new DarknessPower();
+    private static final PowerInterface HEALING_FACTOR   = new HealingPower();
+    private static final PowerInterface PSYCHIC          = new PsychicPower();
+    private static final PowerInterface COSMIC           = new CosmicPower();
+    private static final PowerInterface TELEKINESIS      = new TelekinesisPower();
     private static final PowerInterface INTERDIMENSIONAL = new DimensionalPower();
 
     private static final List<PowerInterface> ALL_POWERS = List.of(
@@ -48,11 +53,26 @@ public class PowerManager {
             PSYCHIC, COSMIC, TELEKINESIS, INTERDIMENSIONAL
     );
 
-    /** UUID → assigned power */
-    private static final Map<UUID, PowerInterface> PLAYER_POWERS = new HashMap<>();
+    /* ============================================================
+       ATTACHMENT HELPER
+       Replaces the old PLAYER_POWERS, PLAYER_LEVELS, and PLAYER_CD_MULT
+       static HashMaps. Data now lives in the player entity's own NBT,
+       so it is automatically scoped to the current world save.
+       ============================================================ */
 
-    /** UUID → power level (1–3) */
-    private static final Map<UUID, Integer> PLAYER_LEVELS = new HashMap<>();
+    /** Returns the attachment for this player, creating it with defaults if absent. */
+    private static PlayerPowerData data(ServerPlayer player) {
+        return player.getData(ModAttachments.POWER_DATA);
+    }
+
+    /** Resolves the stored power name back to a PowerInterface, or null if none. */
+    private static PowerInterface resolvePower(String name) {
+        if (name == null) return null;
+        for (PowerInterface p : ALL_POWERS) {
+            if (p.getName().equals(name)) return p;
+        }
+        return null;
+    }
 
     /* ============================================================
        POWER ASSIGNMENT
@@ -72,21 +92,20 @@ public class PowerManager {
 
     /**
      * Sets a player's power, calling onRemove on the old one and onAssign on
-     * the new one, then persisting immediately so the change survives a crash.
+     * the new one. The change is persisted automatically via the NeoForge
+     * attachment system — no explicit save call is required.
+     *
      * @param silent If true, suppresses the "You gained the power" chat messages.
-     * Used during logins and respawns to avoid spam.
+     *               Used during logins and respawns to avoid spam.
      */
     public static void setPower(ServerPlayer player, PowerInterface power, boolean silent) {
         PowerInterface old = getPower(player);
         if (old != null) old.onRemove(player);
 
-        PLAYER_POWERS.put(player.getUUID(), power);
+        data(player).setPowerName(power.getName());
         power.onAssign(player);
 
         syncClientFlags(player);
-
-        // Persist immediately so admin commands survive crashes
-        PlayerDataStore.save(player);
 
         if (!silent) {
             // TRANSLATED CHAT ANNOUNCEMENTS
@@ -97,18 +116,18 @@ public class PowerManager {
     }
 
     public static void removePower(ServerPlayer player) {
-        PowerInterface current = PLAYER_POWERS.remove(player.getUUID());
+        PowerInterface current = getPower(player);
         if (current != null) current.onRemove(player);
 
-        clearAllCooldowns(player);
-        player.removeAllEffects(); // clearStatusEffects -> removeAllEffects
+        data(player).clearPower();
 
-        // Save the now-empty state so the file also has this
-        PlayerDataStore.save(player);
+        clearAllCooldowns(player);
+        player.removeAllEffects();
     }
 
     /* ============================================================
        COOLDOWNS
+       In-memory only — intentionally transient (reset on server restart).
        ============================================================ */
 
     /** UUID → (abilityKey → epoch-ms when cooldown expires) */
@@ -117,7 +136,6 @@ public class PowerManager {
     private static final Map<String, Long> COOLDOWN_OVERRIDE_MS = new HashMap<>();
 
     private static double  GLOBAL_CD_MULT    = 1.0;
-    private static final Map<UUID, Double> PLAYER_CD_MULT = new HashMap<>();
     private static boolean COOLDOWNS_DISABLED = false;
 
     private static long nowMs() { return System.currentTimeMillis(); }
@@ -207,10 +225,11 @@ public class PowerManager {
     public static void setGlobalCooldownMultiplier(double mult)          { GLOBAL_CD_MULT = Math.max(0.0, mult); }
 
     public static void setPlayerCooldownMultiplier(ServerPlayer player, double mult) {
-        PLAYER_CD_MULT.put(player.getUUID(), Math.max(0.0, mult));
+        data(player).setCdMult(Math.max(0.0, mult));
     }
+
     public static void clearPlayerCooldownMultiplier(ServerPlayer player) {
-        PLAYER_CD_MULT.remove(player.getUUID());
+        data(player).setCdMult(1.0);
     }
 
     public static void setCooldownsDisabled(boolean disabled) { COOLDOWNS_DISABLED = disabled; }
@@ -223,7 +242,7 @@ public class PowerManager {
         if (override != null) ms = override;
 
         ms = (long) Math.max(0L, ms * GLOBAL_CD_MULT);
-        double pm = PLAYER_CD_MULT.getOrDefault(player.getUUID(), 1.0);
+        double pm = data(player).getCdMult();
         ms = (long) Math.max(0L, ms * pm);
 
         return ms;
@@ -234,13 +253,12 @@ public class PowerManager {
        ============================================================ */
 
     public static void usePrimary(ServerPlayer player) {
-        PowerInterface power = PLAYER_POWERS.get(player.getUUID());
+        PowerInterface power = getPower(player);
 
         if (power == null) {
             CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.no_power").withStyle(ChatFormatting.RED), 40);
             return;
         }
-
 
         if (player.hasEffect(ModEffects.DISPLACED) && !(power instanceof HealingPower)) {
             CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
@@ -257,9 +275,8 @@ public class PowerManager {
     }
 
     public static void useSecondary(ServerPlayer player) {
-        PowerInterface power = PLAYER_POWERS.get(player.getUUID());
+        PowerInterface power = getPower(player);
 
-        // No power check
         if (power == null) {
             CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.no_power").withStyle(ChatFormatting.RED), 40);
             return;
@@ -286,16 +303,15 @@ public class PowerManager {
     }
 
     public static void useUltimate(ServerPlayer player) {
-        PowerInterface power = PLAYER_POWERS.get(player.getUUID());
+        PowerInterface power = getPower(player);
 
-        // No power check
         if (power == null) {
             CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.no_power").withStyle(ChatFormatting.RED), 40);
             return;
         }
 
         if (player.hasEffect(ModEffects.DISPLACED)) {
-           CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
+            CooldownUI.pushActionbarOverride(player, Component.translatable("message.loopypowers.displaced").withStyle(ChatFormatting.RED), 20);
             return;
         }
 
@@ -315,7 +331,7 @@ public class PowerManager {
     }
 
     private static void syncClientFlags(ServerPlayer player) {
-        PowerInterface p = PLAYER_POWERS.get(player.getUUID());
+        PowerInterface p = getPower(player);
         boolean hasStrength = (p instanceof StrengthPower);
 
         PacketDistributor.sendToPlayer(
@@ -326,7 +342,7 @@ public class PowerManager {
 
     private static long modifyCooldown(ServerPlayer player, PowerInterface power, AbilityTypes type, long baseMs) {
         if (power instanceof StrengthPower && type != AbilityTypes.ULTIMATE && StrengthPower.isRaging(player)) {
-        return Math.max(250L, (long)(baseMs * 0.15));
+            return Math.max(250L, (long)(baseMs * 0.15));
         }
         return baseMs;
     }
@@ -336,7 +352,7 @@ public class PowerManager {
        ============================================================ */
 
     public static PowerInterface getPower(ServerPlayer player) {
-        return PLAYER_POWERS.get(player.getUUID());
+        return resolvePower(data(player).getPowerName());
     }
 
     public static String abilityKey(PowerInterface power, AbilityTypes type) {
@@ -348,11 +364,11 @@ public class PowerManager {
        ============================================================ */
 
     public static int getLevel(ServerPlayer player) {
-        return PLAYER_LEVELS.getOrDefault(player.getUUID(), 1);
+        return data(player).getLevel();
     }
 
     public static void setLevel(ServerPlayer player, int level) {
-        PLAYER_LEVELS.put(player.getUUID(), Math.max(1, Math.min(3, level)));
+        data(player).setLevel(level);
     }
 
     public static void levelUp(ServerPlayer player) {
@@ -364,7 +380,9 @@ public class PowerManager {
     }
 
     /* ============================================================
-       PERSISTENCE  (called by PlayerDataStore)
+       GLOBAL STATE PERSISTENCE  (server-wide settings only)
+       Per-player data is now handled automatically by the attachment
+       system and no longer needs explicit save/load calls here.
        ============================================================ */
 
     private static boolean globalStateLoaded = false;
@@ -388,76 +406,23 @@ public class PowerManager {
         if (tag.contains("global_cd_mult")) GLOBAL_CD_MULT = tag.getDouble("global_cd_mult");
     }
 
-    public static void saveToNbt(ServerPlayer player, CompoundTag nbt) {
-        PowerInterface power = getPower(player);
-        if (power != null) nbt.putString("lp_power", power.getName());
-
-        nbt.putInt("lp_level", getLevel(player));
-
-        // Save toggle states and modifiers
-        nbt.putBoolean("lp_passive", PassiveManager.isEnabled(player));
-
-        Double cdMult = PLAYER_CD_MULT.get(player.getUUID());
-        if (cdMult != null) {
-            nbt.putDouble("lp_cd_mult", cdMult);
-        }
-
-        Map<String, Long> cds = COOLDOWN_END_MS.get(player.getUUID());
-        if (cds != null && !cds.isEmpty()) {
-            CompoundTag cdTag = new CompoundTag();
-            for (Map.Entry<String, Long> entry : cds.entrySet()) {
-                cdTag.putLong(entry.getKey(), entry.getValue());
-            }
-            nbt.put("lp_cooldowns", cdTag);
-        }
-    }
-
-    public static void loadFromNbt(ServerPlayer player, CompoundTag nbt) {
-        // Ensures the global file is loaded when the first player joins
+    /**
+     * Called on first player join to trigger global state loading.
+     * Per-player data is loaded automatically by NeoForge via the attachment;
+     * we only need to run onAssign so passive effects are re-applied.
+     */
+    public static void onPlayerLoad(ServerPlayer player) {
         checkLoadGlobalState(player.getServer());
 
-        if (nbt.contains("lp_power")) {
-            String name = nbt.getString("lp_power");
-            for (PowerInterface p : ALL_POWERS) {
-                if (p.getName().equals(name)) {
-                    PLAYER_POWERS.put(player.getUUID(), p);
-                    p.onAssign(player);
-                    syncClientFlags(player);
-                    break;
-                }
-            }
+        // Re-apply the power's passive effects now that the player entity exists.
+        PowerInterface power = getPower(player);
+        if (power != null) {
+            power.onAssign(player);
+            syncClientFlags(player);
         }
 
-        if (nbt.contains("lp_level")) {
-            setLevel(player, nbt.getInt("lp_level"));
-        }
-
-        // Load toggle states and modifiers
-        if (nbt.contains("lp_passive")) {
-            PassiveManager.setPassiveState(player, nbt.getBoolean("lp_passive"));
-        } else {
-            PassiveManager.setPassiveState(player, true);
-        }
-
-        if (nbt.contains("lp_cd_mult")) {
-            PLAYER_CD_MULT.put(player.getUUID(), nbt.getDouble("lp_cd_mult"));
-        }
-
-        if (nbt.contains("lp_cooldowns")) {
-            CompoundTag cdTag = nbt.getCompound("lp_cooldowns");
-
-            Map<String, Long> map = new HashMap<>();
-            long now = nowMs();
-
-            for (String key : cdTag.getAllKeys()) {
-                long endMs = cdTag.getLong(key);
-                if (endMs > now) {
-                    map.put(key, endMs);
-                    CooldownUI.setCooldownEnd(player, key, endMs, (Component) null);
-                }
-            }
-            COOLDOWN_END_MS.put(player.getUUID(), map);
-        }
+        // Restore passive toggle state into PassiveManager's in-memory tracking.
+        PassiveManager.setPassiveState(player, data(player).isPassive());
     }
 
     public static void copyCooldowns(ServerPlayer oldPlayer, ServerPlayer newPlayer) {
@@ -467,11 +432,15 @@ public class PowerManager {
     }
 
     public static void clearPlayerState(ServerPlayer player) {
-        UUID id = player.getUUID();
-        PLAYER_POWERS.remove(id);
-        PLAYER_LEVELS.remove(id);
-        COOLDOWN_END_MS.remove(id);
-        PLAYER_CD_MULT.remove(id);
+        PowerInterface current = getPower(player);
+        if (current != null) current.onRemove(player);
+
+        data(player).clearPower();
+        data(player).setLevel(1);
+        data(player).setCdMult(1.0);
+        data(player).setPassive(true);
+
+        COOLDOWN_END_MS.remove(player.getUUID());
         PassiveManager.setPassiveState(player, true);
     }
 
@@ -482,7 +451,7 @@ public class PowerManager {
     public static int getModifiedCooldownTicks(ServerPlayer player, int baseTicks) {
         if (COOLDOWNS_DISABLED) return 0;
 
-        double mult = GLOBAL_CD_MULT * PLAYER_CD_MULT.getOrDefault(player.getUUID(), 1.0);
+        double mult = GLOBAL_CD_MULT * data(player).getCdMult();
         return (int) Math.max(0, Math.round(baseTicks * mult));
     }
 }

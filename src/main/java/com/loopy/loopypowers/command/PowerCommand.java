@@ -625,7 +625,6 @@ public class PowerCommand {
 
         for (ServerPlayer p : targets) {
             PowerManager.removePower(p);  // clears in-memory power, level, cooldowns
-            PlayerDataStore.delete(p);    // wipes the save file entirely
             p.sendSystemMessage(Component.literal("§cAll power data cleared."));
         }
 

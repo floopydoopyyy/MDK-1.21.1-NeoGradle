@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,14 +12,16 @@ public record BloodBindPayload(int casterId, int targetId, boolean active) imple
             new Type<>(ResourceLocation.fromNamespaceAndPath("loopypowers", "blood_bind"));
 
     public static final StreamCodec<ByteBuf, BloodBindPayload> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.INT, BloodBindPayload::casterId,
-            ByteBufCodecs.INT, BloodBindPayload::targetId,
+            ByteBufCodecs.INT,  BloodBindPayload::casterId,
+            ByteBufCodecs.INT,  BloodBindPayload::targetId,
             ByteBufCodecs.BOOL, BloodBindPayload::active,
             BloodBindPayload::new
     );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

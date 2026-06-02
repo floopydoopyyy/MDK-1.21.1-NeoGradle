@@ -6,29 +6,25 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
 
 /**
- * Handles reading and writing per-player power data to disk.
+ * Handles reading and writing power data to disk.
+ *
+ * Per-player state (power, level, cd multiplier, passive toggle) is now
+ * persisted automatically by NeoForge via the PlayerPowerData attachment
+ * registered in ModAttachments. The save()/load() methods below no longer
+ * need to touch per-player files; they exist so existing call sites compile
+ * without change.
+ *
+ * Global server state (cooldown on/off, global multiplier) is still written
+ * to loopypowers/global.dat by saveGlobal()/loadGlobal() as before.
  */
 public class PlayerDataStore {
 
     // ── Path helpers ──────────────────────────────────────────────────────────
-
-    private static Path getPlayerDir(MinecraftServer server) {
-        // getRunDirectory() becomes getServerDirectory() in Mojmap
-        return server.getServerDirectory()
-                .resolve("loopypowers")
-                .resolve("playerdata");
-    }
-
-    private static Path getPlayerFile(MinecraftServer server, UUID uuid) {
-        return getPlayerDir(server).resolve(uuid + ".dat");
-    }
 
     private static Path getGlobalFile(MinecraftServer server) {
         return server.getServerDirectory()
@@ -39,64 +35,44 @@ public class PlayerDataStore {
     // ── Public API (Per-Player) ───────────────────────────────────────────────
 
     /**
-     * Serialises the player's power, level, and cooldowns to disc.
+     * No-op: per-player data is now persisted automatically by the NeoForge
+     * attachment system. Kept so existing call sites compile without change.
      */
     public static void save(ServerPlayer player) {
-        MinecraftServer server = player.getServer();
-        if (server == null) return;
-
-        CompoundTag nbt = new CompoundTag();
-        PowerManager.saveToNbt(player, nbt);
-
-        Path file = getPlayerFile(server, player.getUUID());
-
-        try {
-            Files.createDirectories(file.getParent());
-            NbtIo.writeCompressed(nbt, file);
-        } catch (IOException e) {
-            Loopypowers.LOGGER.error(
-                    "[Loopypowers] Failed to save player data for {} ({}): {}",
-                    player.getName().getString(), player.getUUID(), e.getMessage()
-            );
-        }
+        // Attachment data is written into the player entity's own NBT by
+        // NeoForge — no manual file write is needed.
     }
 
     /**
-     * Deserialises and applies power, level, and cooldown data for a player.
+     * Triggers onPlayerLoad so passive effects are re-applied and the client
+     * is synced. The attachment data itself is already loaded by NeoForge
+     * before PlayerLoggedInEvent fires, so we only need the post-load hook.
+     *
+     * Previously this was gated on the existence of a loopypowers .dat file,
+     * which meant brand-new players (no file yet) never had their power
+     * initialised on login. That guard is intentionally removed.
      */
     public static void load(ServerPlayer player) {
-        MinecraftServer server = player.getServer();
-        if (server == null) return;
-
-        Path file = getPlayerFile(server, player.getUUID());
-        if (!Files.exists(file)) return;
-
-        try {
-            CompoundTag nbt = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
-            if (nbt != null) {
-                PowerManager.loadFromNbt(player, nbt);
-            }
-        } catch (IOException e) {
-            Loopypowers.LOGGER.error(
-                    "[Loopypowers] Failed to load player data for {} ({}): {}",
-                    player.getName().getString(), player.getUUID(), e.getMessage()
-            );
-        }
+        PowerManager.onPlayerLoad(player);
     }
 
     /**
-     * Deletes the save file for a player.
+     * Deletes the legacy per-player .dat file if one exists from a previous
+     * version of the mod. Safe to call even if the file is absent.
      */
-    public static void delete(ServerPlayer player) {
+    public static void deleteLegacyFile(ServerPlayer player) {
         MinecraftServer server = player.getServer();
         if (server == null) return;
 
-        Path file = getPlayerFile(server, player.getUUID());
+        Path file = server.getServerDirectory()
+                .resolve("loopypowers")
+                .resolve("playerdata")
+                .resolve(player.getUUID() + ".dat");
         try {
             Files.deleteIfExists(file);
         } catch (IOException e) {
             Loopypowers.LOGGER.error(
-                    "[Loopypowers] Failed to delete player data for {}: {}",
+                    "[Loopypowers] Failed to delete legacy player data for {}: {}",
                     player.getUUID(), e.getMessage()
             );
         }

@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -15,7 +16,7 @@ public record PsychicSpikeBeamPayload(Vec3 start, Vec3 end, boolean isChain) imp
             StreamCodec.of(
                     (buf, p) -> {
                         buf.writeDouble(p.start().x); buf.writeDouble(p.start().y); buf.writeDouble(p.start().z);
-                        buf.writeDouble(p.end().x); buf.writeDouble(p.end().y); buf.writeDouble(p.end().z);
+                        buf.writeDouble(p.end().x);   buf.writeDouble(p.end().y);   buf.writeDouble(p.end().z);
                         buf.writeBoolean(p.isChain());
                     },
                     buf -> new PsychicSpikeBeamPayload(
@@ -24,6 +25,10 @@ public record PsychicSpikeBeamPayload(Vec3 start, Vec3 end, boolean isChain) imp
                             buf.readBoolean()
                     )
             );
+
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {}));
+    }
 
     @Override
     public Type<? extends CustomPacketPayload> type() {

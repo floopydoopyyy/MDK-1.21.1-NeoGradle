@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -18,8 +19,10 @@ public record ElementalRitualTickPayload(int entityId, int ticks) implements Cus
             ElementalRitualTickPayload::new
     );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

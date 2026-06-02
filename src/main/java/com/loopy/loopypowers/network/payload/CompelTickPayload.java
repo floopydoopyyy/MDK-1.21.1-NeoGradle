@@ -1,15 +1,11 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
-/**
- * Sent every tick by CompelEntity (server → all tracking clients).
- * Carries the position, velocity direction, and life counter needed
- * to reconstruct the single-helix + core-line particle trail on the client.
- */
 public record CompelTickPayload(
         double x, double y, double z,
         double vx, double vy, double vz,
@@ -37,8 +33,10 @@ public record CompelTickPayload(
                     )
             );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

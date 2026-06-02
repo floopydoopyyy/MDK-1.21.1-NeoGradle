@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -21,8 +22,10 @@ public record HealingUltPayload(int entityId, int phase, int ultTicks, boolean i
             buf -> new HealingUltPayload(buf.readInt(), buf.readByte(), buf.readShort(), buf.readBoolean())
     );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

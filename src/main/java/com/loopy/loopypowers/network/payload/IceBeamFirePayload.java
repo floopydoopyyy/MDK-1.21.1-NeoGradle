@@ -1,19 +1,11 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
-/**
- * Sent every tick while the beam is firing.
- * Contains the already-raycasted start and end world positions so the
- * client can reproduce the spiral beam without doing any raycasting itself.
- *
- * @param startX / startY / startZ  Muzzle world position.
- * @param endX   / endY   / endZ    Beam endpoint (block hit or max range).
- * @param gameTime  Server game time — drives the spiral rotation angle.
- */
 public record IceBeamFirePayload(
         double startX, double startY, double startZ,
         double endX,   double endY,   double endZ,
@@ -35,6 +27,10 @@ public record IceBeamFirePayload(
                     buf.readLong()
             )
     );
+
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+    }
 
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

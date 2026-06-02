@@ -6,8 +6,10 @@ import com.loopy.loopypowers.effect.ModEffects;
 import com.loopy.loopypowers.entity.ModEntities;
 import com.loopy.loopypowers.item.ModItemGroups;
 import com.loopy.loopypowers.item.ModItems;
+import com.loopy.loopypowers.manager.ModAttachments;
 import com.loopy.loopypowers.manager.PlayerDataStore;
 import com.loopy.loopypowers.manager.PowerManager;
+import com.loopy.loopypowers.network.PayloadInit;
 import com.loopy.loopypowers.network.payload.*;
 import com.loopy.loopypowers.power.*;
 import com.loopy.loopypowers.ritual.RitualManager;
@@ -44,12 +46,15 @@ public class Loopypowers {
     public static final Logger LOGGER  = LoggerFactory.getLogger(MOD_ID);
 
     public Loopypowers(IEventBus modEventBus) {
+        PayloadInit.init();
+
         ModEntities.register(modEventBus);
         ModSounds.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
         ModEffects.register(modEventBus);
         ModItemGroups.register(modEventBus);
+        ModAttachments.ATTACHMENT_TYPES.register(modEventBus);
 
         // ── Lifecycle setup (runs after registries are frozen) ──
         modEventBus.addListener(this::commonSetup);
@@ -71,45 +76,52 @@ public class Loopypowers {
        PLAYER LIFECYCLE EVENTS
        ============================================================ */
 
-    // ServerPlayConnectionEvents.JOIN -> PlayerEvent.PlayerLoggedInEvent
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) { // ServerPlayerEntity -> ServerPlayer
+        if (event.getEntity() instanceof ServerPlayer player) {
+            // Attachment data is already loaded by NeoForge at this point.
+            // load() just calls onPlayerLoad to re-apply passive effects and sync the client.
             PlayerDataStore.load(player);
         }
     }
 
-    // ServerPlayConnectionEvents.DISCONNECT -> PlayerEvent.PlayerLoggedOutEvent
     @SubscribeEvent
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            // save() is a no-op for per-player data (attachment handles it automatically).
+            // We keep the call so nothing breaks if you later add global-per-player saves.
             PlayerDataStore.save(player);
-            // Prevent memory leaks on disconnect
+            // Clear in-memory cooldown maps to prevent memory leaks on disconnect.
             PowerManager.clearPlayerState(player);
         }
     }
 
-    // ServerPlayerEvents.COPY_FROM -> PlayerEvent.Clone
-    // event.isWasDeath(): true = player died; false = dimension change.
-    // The original code didn't branch on `alive`, so no logic change is needed.
+    /**
+     * Fires on both death (isWasDeath=true) and dimension change (isWasDeath=false).
+     *
+     * The PlayerPowerData attachment is registered with copyOnDeath(), so NeoForge
+     * copies the attachment from oldPlayer to newPlayer automatically before this
+     * event fires. We must NOT call setPower/setLevel here — that would trigger
+     * onRemove on the already-copied power and then onAssign a second time.
+     *
+     * Instead we just copy in-memory cooldowns (which are not in the attachment)
+     * and call onPlayerLoad to re-apply passive effects on the new entity.
+     */
     @SubscribeEvent
     public void onPlayerClone(PlayerEvent.Clone event) {
         if (!(event.getOriginal() instanceof ServerPlayer oldPlayer)) return;
         if (!(event.getEntity()   instanceof ServerPlayer newPlayer)) return;
 
-        PowerInterface oldPower = PowerManager.getPower(oldPlayer); // Power -> PowerInterface
-        if (oldPower != null) {
-            // Silently assign so we don't spam them with text on respawn
-            PowerManager.setPower(newPlayer, oldPower, true);
-        }
-
-        int level = PowerManager.getLevel(oldPlayer);
-        PowerManager.setLevel(newPlayer, level);
+        // In-memory cooldown timestamps live in PowerManager's static map, not in
+        // the attachment, so they must be transferred manually.
         PowerManager.copyCooldowns(oldPlayer, newPlayer);
-        PlayerDataStore.save(newPlayer);
+
+        // Re-apply passive effects and sync the client for the new player entity.
+        // Attachment data (power name, level, cd mult, passive toggle) is already
+        // present on newPlayer courtesy of NeoForge's copyOnDeath copy.
+        PowerManager.onPlayerLoad(newPlayer);
     }
 
-    // ServerLivingEntityEvents.AFTER_DEATH -> LivingDeathEvent
     @SubscribeEvent
     public void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
@@ -124,9 +136,6 @@ public class Loopypowers {
        COMBAT EVENTS
        ============================================================ */
 
-    // AttackEntityCallback.EVENT -> AttackEntityEvent
-    // In NeoForge this fires server-side when a player swings at an entity,
-    // before vanilla damage is applied. Cancel it to suppress the vanilla hit.
     @SubscribeEvent
     public void onAttackEntity(AttackEntityEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
@@ -139,13 +148,6 @@ public class Loopypowers {
         // Individual powers cancel via the damage hook below if needed.
     }
 
-    // ServerLivingEntityEvents.ALLOW_DAMAGE -> LivingIncomingDamageEvent
-    //
-    // Key simplification: the Fabric hasCustomEffect / removeCustomEffect helpers
-    // were workarounds for Fabric's registry-entry wrapping. In NeoForge,
-    // ModEffects.X are DeferredHolder<MobEffect, ?> which implement Holder<MobEffect>,
-    // so entity.hasEffect(ModEffects.X) and entity.removeEffect(ModEffects.X)
-    // work directly — no helpers needed.
     @SubscribeEvent
     public void onLivingIncomingDamage(LivingIncomingDamageEvent event) {
         LivingEntity victim = event.getEntity();
@@ -154,20 +156,16 @@ public class Loopypowers {
 
         // -- GLOBAL EVENTS --
 
-        // keep displace immunity at top — fast fail
-        // hasCustomEffect(victim, ModEffects.DISPLACED) -> victim.hasEffect(ModEffects.DISPLACED)
         if (victim.hasEffect(ModEffects.DISPLACED)) {
             event.setCanceled(true);
             return;
         }
-        // source.getAttacker() -> source.getEntity()
         if (source.getEntity() instanceof LivingEntity attacker && attacker.hasEffect(ModEffects.DISPLACED)) {
             event.setCanceled(true);
             return;
         }
 
         // Fall damage immunity (Braced)
-        // source.isIn(tag) -> source.is(tag), net.minecraft.registry.tag -> net.minecraft.tags
         if (source.is(DamageTypeTags.IS_FALL)) {
             if (victim.hasEffect(ModEffects.BRACED)) {
                 victim.removeEffect(ModEffects.BRACED);
@@ -227,19 +225,16 @@ public class Loopypowers {
        SERVER TICK
        ============================================================ */
 
-    // ServerTickEvents.END_SERVER_TICK -> ServerTickEvent.Post
     @SubscribeEvent
     public void onServerTickEnd(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
 
         RitualManager.tick(server);
 
-        // server.getWorlds() -> server.getAllLevels()
         for (ServerLevel world : server.getAllLevels()) {
             FortunePower.tickHousesWorld(world);
         }
 
-        // server.getPlayerManager().getPlayerList() -> server.getPlayerList().getPlayers()
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             tickPlayer(player);
         }

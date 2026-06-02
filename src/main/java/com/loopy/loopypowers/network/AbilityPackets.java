@@ -14,10 +14,6 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
-// @EventBusSubscriber auto-registers the @SubscribeEvent method below on the MOD bus.
-// This class is responsible ONLY for server-bound (playToServer) registrations.
-// Client-bound (playToClient) registrations live in LoopypowersClient.registerNetwork()
-// so they are only touched on Dist.CLIENT and never registered twice.
 @EventBusSubscriber(modid = Loopypowers.MOD_ID)
 public class AbilityPackets {
 
@@ -67,8 +63,10 @@ public class AbilityPackets {
 
     /* ============================================================
        CLIENT-BOUND PAYLOAD DEFINITIONS (Server -> Client)
-       Handlers are registered in LoopypowersClient — definitions
-       live here so both sides can reference the same types.
+       Each static block registers into ClientPayloadRegistry with
+       the REAL handler. The server never invokes playToClient
+       handlers so client class references in lambdas are safe.
+       One registration, no double-registration possible.
        ============================================================ */
 
     public record CameraShakePayload(int ticks, float strength) implements CustomPacketPayload {
@@ -77,8 +75,11 @@ public class AbilityPackets {
         public static final StreamCodec<ByteBuf, CameraShakePayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.INT,   CameraShakePayload::ticks,
                 ByteBufCodecs.FLOAT, CameraShakePayload::strength,
-                CameraShakePayload::new
-        );
+                CameraShakePayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.CameraShakeClient.start(p.ticks(), p.strength())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -87,8 +88,11 @@ public class AbilityPackets {
                 new Type<>(ResourceLocation.fromNamespaceAndPath(Loopypowers.MOD_ID, "sync_strength_power"));
         public static final StreamCodec<ByteBuf, SyncStrengthPayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.BOOL, SyncStrengthPayload::hasStrength,
-                SyncStrengthPayload::new
-        );
+                SyncStrengthPayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.network.ClientPowerState.setStrengthPower(p.hasStrength())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -98,8 +102,11 @@ public class AbilityPackets {
         public static final StreamCodec<ByteBuf, HidePlayerPayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.INT, HidePlayerPayload::entityId,
                 ByteBufCodecs.INT, HidePlayerPayload::ticks,
-                HidePlayerPayload::new
-        );
+                HidePlayerPayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.HiddenPlayersClient.hide(p.entityId(), p.ticks())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -108,8 +115,11 @@ public class AbilityPackets {
                 new Type<>(ResourceLocation.fromNamespaceAndPath(Loopypowers.MOD_ID, "stun_audio"));
         public static final StreamCodec<ByteBuf, StunAudioPayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.INT, StunAudioPayload::ticks,
-                StunAudioPayload::new
-        );
+                StunAudioPayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.StunAudioClient.setStun(p.ticks())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -120,8 +130,11 @@ public class AbilityPackets {
                 ByteBufCodecs.INT,   ResonanceTrailPayload::targetId,
                 ByteBufCodecs.INT,   ResonanceTrailPayload::count,
                 ByteBufCodecs.FLOAT, ResonanceTrailPayload::intensity,
-                ResonanceTrailPayload::new
-        );
+                ResonanceTrailPayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.SoundFX.addTrailPoints(p.targetId(), p.count(), p.intensity())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -131,8 +144,11 @@ public class AbilityPackets {
         public static final StreamCodec<ByteBuf, ResonanceRingPayload> CODEC = StreamCodec.composite(
                 ByteBufCodecs.INT,   ResonanceRingPayload::targetId,
                 ByteBufCodecs.FLOAT, ResonanceRingPayload::intensity,
-                ResonanceRingPayload::new
-        );
+                ResonanceRingPayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.SoundFX.spawnRing(p.targetId(), p.intensity())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
@@ -143,23 +159,25 @@ public class AbilityPackets {
                 ByteBufCodecs.INT,   ResonanceLinePayload::targetId,
                 ByteBufCodecs.INT,   ResonanceLinePayload::ticks,
                 ByteBufCodecs.FLOAT, ResonanceLinePayload::intensity,
-                ResonanceLinePayload::new
-        );
+                ResonanceLinePayload::new);
+        static {
+            ClientPayloadRegistry.add(ID, CODEC,
+                    (p, ctx) -> ctx.enqueueWork(() -> com.loopy.loopypowers.client.fx.SoundFX.setLine(p.targetId(), p.ticks())));
+        }
         @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
     /* ============================================================
-       REGISTRATION — SERVER-BOUND ONLY
-       Client-bound payloads are registered in LoopypowersClient
-       so this method is never called on Dist.CLIENT, preventing
-       the double-registration crash.
+       REGISTRATION — single event handler, no dist split needed.
+       ClientPayloadRegistry.registerAll() registers every channel
+       exactly once with its real handler already embedded.
        ============================================================ */
 
     @SubscribeEvent
     public static void register(final RegisterPayloadHandlersEvent event) {
-        // Version string must match the one used in LoopypowersClient exactly.
         final PayloadRegistrar registrar = event.registrar(Loopypowers.MOD_ID).versioned("1");
 
+        // ── Server-bound ───────────────────────────────────────────────────
         registrar.playToServer(PrimaryAbilityPayload.ID, PrimaryAbilityPayload.CODEC,
                 (payload, context) -> context.enqueueWork(() ->
                         PowerManager.usePrimary((ServerPlayer) context.player())));
@@ -177,9 +195,10 @@ public class AbilityPackets {
                         PassiveManager.toggle((ServerPlayer) context.player())));
 
         registrar.playToServer(FlightGlidePayload.ID, FlightGlidePayload.CODEC,
-                (payload, context) -> context.enqueueWork(() -> {
-                    ServerPlayer player = (ServerPlayer) context.player();
-                    player.getTags().add("fl_glide_req");
-                }));
+                (payload, context) -> context.enqueueWork(() ->
+                        context.player().getTags().add("fl_glide_req")));
+
+        // ── Client-bound: one registration each, real handler embedded ─────
+        ClientPayloadRegistry.registerAll(registrar);
     }
 }

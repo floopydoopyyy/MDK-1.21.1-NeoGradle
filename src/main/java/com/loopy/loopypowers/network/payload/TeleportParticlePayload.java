@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -28,15 +29,19 @@ public record TeleportParticlePayload(int eventId, double x1, double y1, double 
         buf.writeDouble(z2);
     }
 
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+    }
+
     @Override
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
 
-    public static final int DODGE = 0;
-    public static final int BLINK = 1;
-    public static final int SWAP_WHIFF = 2;
-    public static final int SWAP_HIT = 3;
-    public static final int FRENZY_TICK = 4;
+    public static final int DODGE         = 0;
+    public static final int BLINK         = 1;
+    public static final int SWAP_WHIFF    = 2;
+    public static final int SWAP_HIT      = 3;
+    public static final int FRENZY_TICK   = 4;
     public static final int FRENZY_STRIKE = 5;
 }

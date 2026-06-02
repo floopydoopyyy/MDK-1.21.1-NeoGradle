@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,14 +12,16 @@ public record ExplosionDropZonePayload(int ownerId, boolean active, int stage) i
             new Type<>(ResourceLocation.fromNamespaceAndPath("loopypowers", "explosion_drop_zone"));
 
     public static final StreamCodec<ByteBuf, ExplosionDropZonePayload> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.INT, ExplosionDropZonePayload::ownerId,
+            ByteBufCodecs.INT,  ExplosionDropZonePayload::ownerId,
             ByteBufCodecs.BOOL, ExplosionDropZonePayload::active,
-            ByteBufCodecs.INT, ExplosionDropZonePayload::stage,
+            ByteBufCodecs.INT,  ExplosionDropZonePayload::stage,
             ExplosionDropZonePayload::new
     );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

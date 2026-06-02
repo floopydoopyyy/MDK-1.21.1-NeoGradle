@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -7,11 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 
 /**
  * One-shot EXPLOSION_EMITTER burst at the player's position.
- * Used by two overdrive collision events that share the same particle type
- * but differ in count and spread:
- *
- *   heavy=true  — entity collision: 4 particles, wide spread  (0.6/0.2/0.6, speed 0.10)
- *   heavy=false — block collision:  3 particles, tight spread (0.15/0.10/0.15, speed 0.02)
+ * heavy=true  — entity collision: 4 particles, wide spread
+ * heavy=false — block collision:  3 particles, tight spread
  */
 public record SpeedExplosionFxPayload(
         double x, double y, double z,
@@ -32,6 +30,10 @@ public record SpeedExplosionFxPayload(
                             buf.readBoolean()
                     )
             );
+
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, CODEC, (payload, ctx) -> {}));
+    }
 
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }

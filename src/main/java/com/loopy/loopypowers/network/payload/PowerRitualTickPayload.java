@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -17,6 +18,10 @@ public record PowerRitualTickPayload(int entityId, int ticks) implements CustomP
             ByteBufCodecs.INT, PowerRitualTickPayload::ticks,
             PowerRitualTickPayload::new
     );
+
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
+    }
 
     @Override
     public Type<? extends CustomPacketPayload> type() {

@@ -1,5 +1,6 @@
 package com.loopy.loopypowers.network.payload;
 
+import com.loopy.loopypowers.network.ClientPayloadRegistry;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -11,15 +12,17 @@ public record BloodWhipPayload(int entityId, double x, double y, double z) imple
             new Type<>(ResourceLocation.fromNamespaceAndPath("loopypowers", "blood_whip"));
 
     public static final StreamCodec<ByteBuf, BloodWhipPayload> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.INT, BloodWhipPayload::entityId,
+            ByteBufCodecs.INT,    BloodWhipPayload::entityId,
             ByteBufCodecs.DOUBLE, BloodWhipPayload::x,
             ByteBufCodecs.DOUBLE, BloodWhipPayload::y,
             ByteBufCodecs.DOUBLE, BloodWhipPayload::z,
             BloodWhipPayload::new
     );
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    static {
+        ClientPayloadRegistry.add(r -> r.playToClient(TYPE, STREAM_CODEC, (payload, ctx) -> {}));
     }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
 }
