@@ -70,9 +70,11 @@ public class ModBlocks {
     // CELESTIAL ORE
     public static final DeferredBlock<CelestialOreBlock> CELESTIAL_ORE = BLOCKS.register("celestial_ore",
             () -> new CelestialOreBlock(
-                    BlockBehaviour.Properties.ofFullCopy(Blocks.DIAMOND_ORE)
-                            .strength(5.0f, 6.0f)
-                            .requiresCorrectToolForDrops() // requiresTool()
+                    BlockBehaviour.Properties.of()
+                            .mapColor(Blocks.DIAMOND_ORE.defaultBlockState().getMapColor(null, null))
+                            .strength(3.0f, 6.0f)
+                            .requiresCorrectToolForDrops()
+                            .sound(SoundType.STONE)
                             .lightLevel(state -> 12)
             )
     );
@@ -82,9 +84,11 @@ public class ModBlocks {
     // DEEPSLATE CELESTIAL ORE
     public static final DeferredBlock<CelestialOreBlock> DEEPSLATE_CELESTIAL_ORE = BLOCKS.register("deepslate_celestial_ore",
             () -> new CelestialOreBlock(
-                    BlockBehaviour.Properties.ofFullCopy(Blocks.DEEPSLATE_DIAMOND_ORE)
-                            .strength(5.5f, 7.0f)
+                    BlockBehaviour.Properties.of()
+                            .mapColor(Blocks.DEEPSLATE_DIAMOND_ORE.defaultBlockState().getMapColor(null, null))
+                            .strength(3.5f, 7.0f)
                             .requiresCorrectToolForDrops()
+                            .sound(SoundType.DEEPSLATE)
                             .lightLevel(state -> 12)
             )
     );
@@ -94,9 +98,11 @@ public class ModBlocks {
     // CELESTIAL BLOCK
     public static final DeferredBlock<CelestialBlock> CELESTIAL_BLOCK = BLOCKS.register("celestial_block",
             () -> new CelestialBlock(
-                    BlockBehaviour.Properties.ofFullCopy(Blocks.NETHERITE_BLOCK)
-                            .strength(5.0f, 6.0f)
+                    BlockBehaviour.Properties.of()
+                            .mapColor(Blocks.NETHERITE_BLOCK.defaultBlockState().getMapColor(null, null))
+                            .strength(3.5f, 6.0f)
                             .requiresCorrectToolForDrops()
+                            .sound(SoundType.METAL)
                             .lightLevel(state -> 12)
             )
     );
