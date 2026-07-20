@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "D": { "item": "minecraft:diamond" },
+    "C": { "item": "witchmod:cursed_essence" },
+    "W": { "item": "minecraft:oak_planks" }
+  },
+  "pattern": [
+    "DDD",
+    "WCW",
+    "WWW"
+  ],
+  "result": { "id": "witchmod:bewitching_table", "count": 1 }
+}

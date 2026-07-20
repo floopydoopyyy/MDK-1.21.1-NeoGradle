@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "W": { "item": "minecraft:white_wool" },
+    "S": { "item": "minecraft:stick" }
+  },
+  "pattern": [
+    "WWW",
+    "WSW",
+    "WWW"
+  ],
+  "result": { "id": "witchmod:voodoo_doll", "count": 1 }
+}

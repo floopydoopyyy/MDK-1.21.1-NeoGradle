@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "minecraft:oak_planks" },
+    { "item": "witchmod:compendium" }
+  ],
+  "result": { "id": "witchmod:ledger", "count": 1 }
+}

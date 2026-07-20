@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "C": { "item": "witchmod:cursed_essence" }
+  },
+  "pattern": [
+    "CCC",
+    "CCC",
+    "CCC"
+  ],
+  "result": { "id": "witchmod:cursed_essence_block", "count": 1 }
+}

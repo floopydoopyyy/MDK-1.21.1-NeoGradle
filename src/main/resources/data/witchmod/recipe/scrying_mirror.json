@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "G": { "item": "minecraft:glass" },
+    "C": { "item": "witchmod:cursed_essence" },
+    "D": { "item": "minecraft:diamond" }
+  },
+  "pattern": [
+    "GGG",
+    "GDG",
+    "GCG"
+  ],
+  "result": { "id": "witchmod:scrying_mirror", "count": 1 }
+}

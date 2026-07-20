@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "minecraft:totem_of_undying" },
+    { "item": "witchmod:cursed_essence" }
+  ],
+  "result": { "id": "witchmod:effigy", "count": 1 }
+}

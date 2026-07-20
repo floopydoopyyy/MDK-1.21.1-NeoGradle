@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "minecraft:compass" },
+    { "item": "minecraft:amethyst_shard" }
+  ],
+  "result": { "id": "witchmod:recovery_compass", "count": 1 }
+}
